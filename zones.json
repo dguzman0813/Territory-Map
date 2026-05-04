@@ -1,0 +1,844 @@
+{
+  "version": "1.3",
+  "last_updated": "2026-05-01",
+  "notes": "Zone definitions and assignment rules for the territory map. assignment_rules are evaluated top-to-bottom; the first match wins. Order is significant \u2014 for LA, polygons may overlap on edges, so the order Albert \u2192 Alex \u2192 Julie \u2192 Zoila resolves ties. For Chicago/Milwaukee, the Milwaukee + N. IL county_list rule must precede the Chicago-CENTRAL lat_band rule so Lake/McHenry IL addresses are not miscategorized.",
+  "zones": {
+    "Chicago-CENTRAL": {
+      "label": "Chicago Central",
+      "market": "CHICAGO",
+      "color": "#7c3aed",
+      "description": "Cook/DuPage/Kane and points north of the stepped Central/South boundary (lat 41.82 most places, but boundary steps up to 41.90 along the downtown lakefront corridor and 41.86 around Berwyn)",
+      "account_manager": "Elizabeth Varela"
+    },
+    "Chicago-SOUTH": {
+      "label": "Chicago South",
+      "market": "CHICAGO",
+      "color": "#0891b2",
+      "description": "South Chicago + NW Indiana (south of the stepped boundary). Includes downtown Chicago lakefront corridor up to lat 41.90 and Berwyn up to lat 41.86.",
+      "account_manager": "Jorge Rodriguez"
+    },
+    "Milwaukee + N. IL": {
+      "label": "Milwaukee + N. Illinois",
+      "market": "MILWAUKEE",
+      "color": "#be185d",
+      "description": "All of Milwaukee market + Lake County IL + McHenry County IL",
+      "account_manager": "Ana Lopes"
+    },
+    "LA-Albert": {
+      "label": "LA \u2014 Albert (North & High Desert)",
+      "market": "LOS ANGELES",
+      "color": "#dc2626",
+      "description": "San Fernando Valley (excluding Burbank), high desert (Lancaster, Palmdale, Victorville), all of Ventura County (Thousand Oaks, Oxnard, Ventura, Ojai, Santa Paula, Simi Valley)",
+      "account_manager": "Albert Trevino"
+    },
+    "LA-Alex": {
+      "label": "LA \u2014 Alex (West Basin & Coast)",
+      "market": "LOS ANGELES",
+      "color": "#2563eb",
+      "description": "West LA basin and coast: LA west of the 5/710, Inglewood, Compton, Lynwood, South Bay, PV peninsula, Wilmington, Malibu (full coast)",
+      "account_manager": "Alex Acuna"
+    },
+    "LA-Julie": {
+      "label": "LA \u2014 Julie (East Basin & North OC)",
+      "market": "LOS ANGELES",
+      "color": "#9333ea",
+      "description": "East LA basin: east downtown, Glendale, Pasadena, Burbank, San Gabriel Valley, Long Beach, north OC (Anaheim, Santa Ana, Fullerton west of 57/55)",
+      "account_manager": "Julie Lin"
+    },
+    "LA-Zoila": {
+      "label": "LA \u2014 Zoila (Inland Empire & South OC)",
+      "market": "LOS ANGELES",
+      "color": "#ea580c",
+      "description": "Inland Empire (Pomona, Ontario, San Bernardino, Riverside, Fontana), south OC (Irvine, Mission Viejo, San Juan Capistrano), eastern high desert",
+      "account_manager": "Zoila Ladd"
+    }
+  },
+  "market_views": {
+    "ALL": {
+      "center": [
+        38.5,
+        -100.0
+      ],
+      "zoom": 4
+    },
+    "LOS ANGELES": {
+      "center": [
+        34.05,
+        -118.25
+      ],
+      "zoom": 9
+    },
+    "CHICAGO_MIL": {
+      "center": [
+        42.0,
+        -88.0
+      ],
+      "zoom": 7
+    }
+  },
+  "assignment_rules": [
+    {
+      "rule_id": "la_albert",
+      "type": "polygon",
+      "match": {
+        "market": "LOS ANGELES"
+      },
+      "params": {
+        "polygon": [
+          [
+            35.2,
+            -120.0
+          ],
+          [
+            35.2,
+            -115.5
+          ],
+          [
+            34.3,
+            -115.5
+          ],
+          [
+            34.3,
+            -117.3
+          ],
+          [
+            34.32,
+            -118.05
+          ],
+          [
+            34.32,
+            -118.28
+          ],
+          [
+            34.22,
+            -118.28
+          ],
+          [
+            34.22,
+            -118.37
+          ],
+          [
+            34.13,
+            -118.37
+          ],
+          [
+            34.13,
+            -118.7
+          ],
+          [
+            34.2,
+            -118.7
+          ],
+          [
+            34.2,
+            -118.75
+          ],
+          [
+            34.05,
+            -118.75
+          ],
+          [
+            34.05,
+            -119.85
+          ],
+          [
+            34.5,
+            -119.85
+          ],
+          [
+            35.2,
+            -120.0
+          ]
+        ]
+      },
+      "assign_zone_id": "LA-Albert",
+      "description": "Albert: north of LA basin, San Fernando Valley (excluding Burbank), high desert (Lancaster, Palmdale, Victorville, Barstow), all of Ventura County including Thousand Oaks, Oxnard, Ventura, Ojai, Santa Paula. Burbank carved out and assigned to Julie."
+    },
+    {
+      "rule_id": "la_alex",
+      "type": "polygon",
+      "match": {
+        "market": "LOS ANGELES"
+      },
+      "params": {
+        "polygon": [
+          [
+            34.13,
+            -118.225
+          ],
+          [
+            34.13,
+            -118.3
+          ],
+          [
+            34.13,
+            -118.55
+          ],
+          [
+            34.13,
+            -118.75
+          ],
+          [
+            34.05,
+            -118.75
+          ],
+          [
+            34.02,
+            -118.8
+          ],
+          [
+            34.02,
+            -118.7
+          ],
+          [
+            34.02,
+            -118.55
+          ],
+          [
+            33.9,
+            -118.45
+          ],
+          [
+            33.78,
+            -118.43
+          ],
+          [
+            33.71,
+            -118.32
+          ],
+          [
+            33.71,
+            -118.27
+          ],
+          [
+            33.74,
+            -118.22
+          ],
+          [
+            33.77,
+            -118.2
+          ],
+          [
+            33.85,
+            -118.18
+          ],
+          [
+            33.92,
+            -118.18
+          ],
+          [
+            33.99,
+            -118.18
+          ],
+          [
+            33.99,
+            -118.225
+          ],
+          [
+            34.1,
+            -118.225
+          ],
+          [
+            34.13,
+            -118.225
+          ]
+        ]
+      },
+      "assign_zone_id": "LA-Alex",
+      "description": "Alex: west of the 710 (and west of the 5 in downtown, lat 33.99-34.10). Coast from Malibu (full coast, fixed in v1.2) to PV peninsula. Includes Wilmington, San Pedro, Inglewood, Compton, Lynwood, South Gate."
+    },
+    {
+      "rule_id": "la_julie",
+      "type": "polygon",
+      "match": {
+        "market": "LOS ANGELES"
+      },
+      "params": {
+        "polygon": [
+          [
+            34.22,
+            -118.37
+          ],
+          [
+            34.22,
+            -118.28
+          ],
+          [
+            34.22,
+            -117.86
+          ],
+          [
+            33.88,
+            -117.86
+          ],
+          [
+            33.55,
+            -117.87
+          ],
+          [
+            33.55,
+            -118.0
+          ],
+          [
+            33.72,
+            -118.22
+          ],
+          [
+            33.85,
+            -118.18
+          ],
+          [
+            33.92,
+            -118.18
+          ],
+          [
+            33.99,
+            -118.18
+          ],
+          [
+            33.99,
+            -118.225
+          ],
+          [
+            34.1,
+            -118.225
+          ],
+          [
+            34.13,
+            -118.225
+          ],
+          [
+            34.13,
+            -118.37
+          ],
+          [
+            34.22,
+            -118.37
+          ]
+        ]
+      },
+      "assign_zone_id": "LA-Julie",
+      "description": "Julie: east of the 710 (or east of the 5 in downtown), west of the 57 in the north / 55 in OC. Includes Glendale, Pasadena, Burbank (added 2026-05-01), San Gabriel Valley (Whittier, El Monte, etc.), Long Beach, Anaheim, Santa Ana west of 55."
+    },
+    {
+      "rule_id": "la_zoila",
+      "type": "polygon",
+      "match": {
+        "market": "LOS ANGELES"
+      },
+      "params": {
+        "polygon": [
+          [
+            34.27,
+            -117.86
+          ],
+          [
+            34.27,
+            -115.5
+          ],
+          [
+            33.4,
+            -115.5
+          ],
+          [
+            33.4,
+            -117.55
+          ],
+          [
+            33.55,
+            -117.87
+          ],
+          [
+            33.88,
+            -117.86
+          ],
+          [
+            34.2,
+            -117.86
+          ],
+          [
+            34.27,
+            -117.86
+          ]
+        ]
+      },
+      "assign_zone_id": "LA-Zoila",
+      "description": "Zoila: east of the 57/55. Inland Empire (Pomona, Ontario, San Bernardino, Riverside, Fontana, Chino), south OC (Irvine, Mission Viejo, San Juan Capistrano), eastern desert (Big Bear, Yucca Valley)."
+    },
+    {
+      "rule_id": "milwaukee_market",
+      "type": "market_match",
+      "match": {
+        "market": "MILWAUKEE"
+      },
+      "assign_zone_id": "Milwaukee + N. IL",
+      "description": "Entire Milwaukee market goes to the combined Milwaukee + N. IL zone."
+    },
+    {
+      "rule_id": "northern_il_to_milwaukee",
+      "type": "county_list",
+      "match": {
+        "market": "CHICAGO",
+        "state": "Illinois"
+      },
+      "params": {
+        "counties": [
+          "Lake County",
+          "McHenry County"
+        ]
+      },
+      "assign_zone_id": "Milwaukee + N. IL",
+      "description": "Lake & McHenry IL counties go to the Milwaukee zone. MUST evaluate before chicago_central \u2014 otherwise these addresses would match the lat band first."
+    },
+    {
+      "rule_id": "chicago_central",
+      "type": "polygon",
+      "match": {
+        "market": "CHICAGO"
+      },
+      "params": {
+        "polygon": [
+          [
+            42.15,
+            -89.1
+          ],
+          [
+            42.15,
+            -86.7
+          ],
+          [
+            41.9,
+            -86.7
+          ],
+          [
+            41.9,
+            -87.75
+          ],
+          [
+            41.86,
+            -87.75
+          ],
+          [
+            41.86,
+            -87.85
+          ],
+          [
+            41.82,
+            -87.85
+          ],
+          [
+            41.82,
+            -89.1
+          ],
+          [
+            42.15,
+            -89.1
+          ]
+        ]
+      },
+      "assign_zone_id": "Chicago-CENTRAL",
+      "description": "Chicago at or above the Central/South stepped boundary. Boundary follows lat 41.82 across most of the market, but steps UP to lat 41.86 in the Berwyn band (-87.85 to -87.75) and UP again to lat 41.90 in the downtown corridor (-87.75 to lake). Lake/McHenry IL have already been peeled off by the rule above, so this only applies to Cook/DuPage/Kane."
+    },
+    {
+      "rule_id": "chicago_south",
+      "type": "polygon",
+      "match": {
+        "market": "CHICAGO"
+      },
+      "params": {
+        "polygon": [
+          [
+            41.0,
+            -89.1
+          ],
+          [
+            41.82,
+            -89.1
+          ],
+          [
+            41.82,
+            -87.85
+          ],
+          [
+            41.86,
+            -87.85
+          ],
+          [
+            41.86,
+            -87.75
+          ],
+          [
+            41.9,
+            -87.75
+          ],
+          [
+            41.9,
+            -86.7
+          ],
+          [
+            41.0,
+            -86.7
+          ],
+          [
+            41.0,
+            -89.1
+          ]
+        ]
+      },
+      "assign_zone_id": "Chicago-SOUTH",
+      "description": "Chicago south of the Central/South stepped boundary, plus the downtown corridor (lng -87.75 to lake, up to lat 41.90) and the Berwyn band (lng -87.85 to -87.75, up to lat 41.86). Includes NW Indiana."
+    }
+  ],
+  "polygon_overlays": {
+    "_comment": "Approximate visual polygons for the map's zone overlays. These DO NOT drive assignment \u2014 they're cosmetic. Assignment is governed entirely by assignment_rules above. Polygons are arrays of [lat, lng] vertices.",
+    "LA-Albert": [
+      [
+        35.2,
+        -120.0
+      ],
+      [
+        35.2,
+        -115.5
+      ],
+      [
+        34.3,
+        -115.5
+      ],
+      [
+        34.3,
+        -117.3
+      ],
+      [
+        34.32,
+        -118.05
+      ],
+      [
+        34.32,
+        -118.28
+      ],
+      [
+        34.22,
+        -118.28
+      ],
+      [
+        34.22,
+        -118.37
+      ],
+      [
+        34.13,
+        -118.37
+      ],
+      [
+        34.13,
+        -118.7
+      ],
+      [
+        34.2,
+        -118.7
+      ],
+      [
+        34.2,
+        -118.75
+      ],
+      [
+        34.05,
+        -118.75
+      ],
+      [
+        34.05,
+        -119.85
+      ],
+      [
+        34.5,
+        -119.85
+      ],
+      [
+        35.2,
+        -120.0
+      ]
+    ],
+    "LA-Alex": [
+      [
+        34.13,
+        -118.225
+      ],
+      [
+        34.13,
+        -118.3
+      ],
+      [
+        34.13,
+        -118.55
+      ],
+      [
+        34.13,
+        -118.75
+      ],
+      [
+        34.05,
+        -118.75
+      ],
+      [
+        34.02,
+        -118.8
+      ],
+      [
+        34.02,
+        -118.7
+      ],
+      [
+        34.02,
+        -118.55
+      ],
+      [
+        33.9,
+        -118.45
+      ],
+      [
+        33.78,
+        -118.43
+      ],
+      [
+        33.71,
+        -118.32
+      ],
+      [
+        33.71,
+        -118.27
+      ],
+      [
+        33.74,
+        -118.22
+      ],
+      [
+        33.77,
+        -118.2
+      ],
+      [
+        33.85,
+        -118.18
+      ],
+      [
+        33.92,
+        -118.18
+      ],
+      [
+        33.99,
+        -118.18
+      ],
+      [
+        33.99,
+        -118.225
+      ],
+      [
+        34.1,
+        -118.225
+      ],
+      [
+        34.13,
+        -118.225
+      ]
+    ],
+    "LA-Julie": [
+      [
+        34.22,
+        -118.37
+      ],
+      [
+        34.22,
+        -118.28
+      ],
+      [
+        34.22,
+        -117.86
+      ],
+      [
+        33.88,
+        -117.86
+      ],
+      [
+        33.55,
+        -117.87
+      ],
+      [
+        33.55,
+        -118.0
+      ],
+      [
+        33.72,
+        -118.22
+      ],
+      [
+        33.85,
+        -118.18
+      ],
+      [
+        33.92,
+        -118.18
+      ],
+      [
+        33.99,
+        -118.18
+      ],
+      [
+        33.99,
+        -118.225
+      ],
+      [
+        34.1,
+        -118.225
+      ],
+      [
+        34.13,
+        -118.225
+      ],
+      [
+        34.13,
+        -118.37
+      ],
+      [
+        34.22,
+        -118.37
+      ]
+    ],
+    "LA-Zoila": [
+      [
+        34.27,
+        -117.86
+      ],
+      [
+        34.27,
+        -115.5
+      ],
+      [
+        33.4,
+        -115.5
+      ],
+      [
+        33.4,
+        -117.55
+      ],
+      [
+        33.55,
+        -117.87
+      ],
+      [
+        33.88,
+        -117.86
+      ],
+      [
+        34.2,
+        -117.86
+      ],
+      [
+        34.27,
+        -117.86
+      ]
+    ],
+    "Chicago-SOUTH": [
+      [
+        41.0,
+        -89.1
+      ],
+      [
+        41.82,
+        -89.1
+      ],
+      [
+        41.82,
+        -87.85
+      ],
+      [
+        41.86,
+        -87.85
+      ],
+      [
+        41.86,
+        -87.75
+      ],
+      [
+        41.9,
+        -87.75
+      ],
+      [
+        41.9,
+        -86.7
+      ],
+      [
+        41.0,
+        -86.7
+      ],
+      [
+        41.0,
+        -89.1
+      ]
+    ],
+    "Chicago-CENTRAL": [
+      [
+        42.15,
+        -89.1
+      ],
+      [
+        42.15,
+        -86.7
+      ],
+      [
+        41.9,
+        -86.7
+      ],
+      [
+        41.9,
+        -87.75
+      ],
+      [
+        41.86,
+        -87.75
+      ],
+      [
+        41.86,
+        -87.85
+      ],
+      [
+        41.82,
+        -87.85
+      ],
+      [
+        41.82,
+        -89.1
+      ],
+      [
+        42.15,
+        -89.1
+      ]
+    ],
+    "Milwaukee + N. IL": [
+      [
+        42.15,
+        -89.1
+      ],
+      [
+        44.0,
+        -89.1
+      ],
+      [
+        44.0,
+        -87.5
+      ],
+      [
+        42.15,
+        -87.5
+      ]
+    ]
+  },
+  "tuning_notes": [
+    "If Chicago Central managers push back on volume (currently 265 each), the agreed adjustment is to shift Cook County far-north suburbs (Evanston, Skokie, Niles) into the Milwaukee + N. IL zone. To do this, add a rule above chicago_central that matches Cook County + lat >= ~42.0 (or specific zips) and assigns Milwaukee + N. IL.",
+    "LA polygon vertices follow approximate freeway alignments: 710 (~lng -118.18 to -118.20), 57 (~lng -117.86), 55 (~lng -117.87), 605 (~lng -118.10), and the 5/101 in downtown (~lng -118.22). To shift a boundary, find the rule and adjust the vertex coordinates. A 0.01\u00b0 change is roughly 1km.",
+    "Albert/Julie boundary at the Hollywood Hills is a horizontal line at lat 34.13. Pasadena/Glendale (Julie) and the San Fernando Valley (Albert) are separated by this latitude.",
+    "Alex/Julie split in downtown LA uses the 5 freeway / LA river (lng -118.225) as the boundary in the band lat 33.99-34.10, and the 710 (lng -118.18) elsewhere. This gives Julie a slice of east downtown.",
+    "Polygon overlays are cosmetic only. Edit them to change what the map renders. Edit the assignment_rules polygons to change actual zone assignment.",
+    "Account managers were updated to real names on 2026-05-01: Alex Acuna, Albert Trevino, Julie Lin, Zoila Ladd (Chicago/Milwaukee still TBD).",
+    "2026-05-01 (v1.2): Extended Albert's territory west through full Ventura County (Thousand Oaks, Oxnard, Ventura, Ojai). Carved Burbank out of Albert and gave it to Julie. Changed Julie's color from green (#16a34a) to vivid purple (#9333ea) for better visibility. Visual overlays now match assignment polygons exactly (flush, not inset).",
+    "2026-05-01 (v1.2): Fixed pre-existing gap on Malibu coast. Alex's western edge now extends to lng -118.75, sharing a boundary with Albert's new Ventura coast step. Malibu now properly assigned to Alex.",
+    "2026-05-01 (v1.3): Chicago Central/South split is no longer a flat horizontal line. South now claims a downtown lakefront corridor (lng -87.75 to lake, up to lat 41.90) and the Berwyn area (lng -87.85 to -87.75, up to lat 41.86). Oak Park stays in Central. Implementation: converted chicago_central and chicago_south rules from lat_band to polygon. The northern_il_to_milwaukee rule still runs first to peel off Lake/McHenry IL."
+  ]
+}
