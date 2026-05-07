@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VHA Sales Territory Map — Live</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; }
+
+  header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+    color: white;
+    padding: 20px 30px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+  header h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  header p { font-size: 13px; opacity: 0.9; }
+
+  /* Error/status banner — pinned under header. Hidden until needed. */
+  #banner {
+    display: none;
+    padding: 10px 20px;
+    font-size: 13px;
+    border-bottom: 1px solid transparent;
+  }
+  #banner.error {
+    display: block;
+    background: #fef2f2;
+    color: #991b1b;
+    border-bottom-color: #fecaca;
+  }
+  #banner.warn {
+    display: block;
+    background: #fffbeb;
+    color: #92400e;
+    border-bottom-color: #fde68a;
+  }
+  #banner.info {
+    display: block;
+    background: #eff6ff;
+    color: #1e3a8a;
+    border-bottom-color: #bfdbfe;
+  }
+  #banner code {
+    background: rgba(0,0,0,0.05);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  .container {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    height: calc(100vh - 88px);
+  }
+
+  .sidebar {
+    background: white;
+    border-right: 1px solid #e5e7eb;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .market-selector { margin-bottom: 24px; }
+  .market-selector h3 { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .market-btn {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+  }
+  .market-btn:hover { background: #f3f4f6; }
+  .market-btn.active {
+    background: #2563eb;
+    color: white;
+    border-color: #2563eb;
+  }
+  .market-btn .count {
+    float: right;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  .zone-summary { margin-bottom: 24px; }
+  .zone-summary h3 { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .zone-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    background: #f9fafb;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .zone-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    margin-right: 10px;
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+    flex-shrink: 0;
+  }
+  .zone-name { flex: 1; font-weight: 500; color: #374151; font-size: 12px; }
+  .zone-name .sub { color: #9ca3af; font-weight: 400; font-size: 11px; }
+  .zone-count {
+    font-weight: 600;
+    color: #1f2937;
+    background: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  .legend-info {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    color: #0c4a6e;
+    line-height: 1.5;
+  }
+  .legend-info strong { display: block; margin-bottom: 4px; color: #075985; }
+
+  /* ---- Layers section (sidebar) — Day 1B addition ---- */
+  .layers-block { margin-bottom: 24px; }
+  .layers-block h3 {
+    font-size: 12px; text-transform: uppercase; color: #6b7280;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .layer-toggle {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; margin-bottom: 6px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 13px; color: #374151; cursor: pointer; user-select: none;
+  }
+  .layer-toggle input[type="checkbox"] { margin: 0; cursor: pointer; }
+  .layer-toggle .layer-meta {
+    margin-left: auto; font-size: 11px; color: #9ca3af; font-weight: 400;
+  }
+  .layer-colorby {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 12px;
+  }
+  .layer-colorby-label {
+    font-size: 11px; font-weight: 600; color: #374151;
+    text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;
+  }
+  .layer-colorby-options { display: flex; gap: 4px; }
+  .layer-colorby-options .pill { flex: 1; text-align: center; }
+  .layer-colorby[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
+
+  /* ---- Filters (sidebar) ---- */
+  .filters { margin-bottom: 24px; }
+  .filters h3 {
+    font-size: 12px; text-transform: uppercase; color: #6b7280;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .filters .clear-link {
+    font-size: 11px; text-transform: none; letter-spacing: 0;
+    color: #2563eb; cursor: pointer; text-decoration: none; font-weight: 500;
+  }
+  .filters .clear-link:hover { text-decoration: underline; }
+  .filters .clear-link.disabled {
+    color: #d1d5db; cursor: default; pointer-events: none;
+  }
+
+  .filter-block { margin-bottom: 14px; }
+  .filter-block-label {
+    font-size: 11px; font-weight: 600; color: #374151;
+    margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  .filter-search {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: white;
+    color: #374151;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .filter-search:focus { border-color: #2563eb; }
+  .filter-search::placeholder { color: #9ca3af; }
+
+  .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pill {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all .12s;
+    user-select: none;
+  }
+  .pill:hover { background: #f3f4f6; }
+  .pill.on {
+    color: white;
+    border-color: transparent;
+    /* background set inline so manager pills can use zone color */
+  }
+
+  .filter-active-summary {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  #map { height: 100%; }
+
+  .leaflet-popup-content {
+    font-size: 13px;
+    line-height: 1.45;
+    min-width: 240px;
+    max-width: 300px;
+  }
+  .leaflet-popup-content .pop-company {
+    font-weight: 600;
+    font-size: 14px;
+    color: #111827;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .leaflet-popup-content .pop-section {
+    margin-bottom: 8px;
+  }
+  .leaflet-popup-content .pop-section:last-child { margin-bottom: 0; }
+  .leaflet-popup-content .pop-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #9ca3af;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .leaflet-popup-content .pop-line {
+    color: #374151;
+    margin-bottom: 1px;
+  }
+  .leaflet-popup-content .pop-line .lbl {
+    color: #9ca3af;
+    font-size: 11px;
+    margin-right: 4px;
+  }
+  .leaflet-popup-content .pop-meta-row {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    align-items: center;
+  }
+  .pop-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background: #f3f4f6;
+    color: #374151;
+  }
+  .popup-zone {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+  }
+
+  .stats-bar {
+    background: white;
+    padding: 12px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    gap: 24px;
+    font-size: 13px;
+  }
+  .stat { color: #6b7280; }
+  .stat strong { color: #1f2937; font-weight: 600; }
+  .stat.refresh {
+    margin-left: auto;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+
+  .total-summary {
+    margin-bottom: 24px;
+    padding: 12px;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #78350f;
+  }
+  .total-summary strong { display: block; margin-bottom: 4px; color: #92400e; }
+
+  /* Loading state */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #6b7280;
+    z-index: 1000;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Sales Territory Map</h1>
+  <p>Account manager zones across Los Angeles, Chicago, and Milwaukee/N. Illinois</p>
+</header>
+
+<div id="banner"></div>
+
+<div class="container">
+  <aside class="sidebar">
+    <div class="market-selector">
+      <h3>View Market</h3>
+      <button class="market-btn active" data-view="ALL">
+        All Markets <span class="count" data-count="ALL">—</span>
+      </button>
+      <button class="market-btn" data-view="LOS ANGELES">
+        Los Angeles <span class="count" data-count="LOS ANGELES">—</span>
+      </button>
+      <button class="market-btn" data-view="CHICAGO_MIL">
+        Chicago + Milwaukee <span class="count" data-count="CHICAGO_MIL">—</span>
+      </button>
+    </div>
+
+    <div class="filters">
+      <h3>
+        Filters
+        <a class="clear-link disabled" id="clearFilters">Clear all</a>
+      </h3>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Search</div>
+        <input type="text" id="filterSearch" class="filter-search"
+               placeholder="ZIP, city, state, contact, company…"
+               autocomplete="off">
+      </div>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Account Manager</div>
+        <div class="pill-group" id="filterManagers"></div>
+      </div>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Carrier</div>
+        <div class="pill-group" id="filterCarriers"></div>
+      </div>
+    </div>
+
+    <div class="layers-block">
+      <h3>Map Layers</h3>
+      <label class="layer-toggle" for="toggleZipLayer">
+        <input type="checkbox" id="toggleZipLayer">
+        ZIP boundaries
+        <span class="layer-meta" id="zipLayerMeta">—</span>
+      </label>
+      <div class="layer-colorby" id="zipColorByBlock" aria-disabled="true">
+        <div class="layer-colorby-label">Color ZIPs by</div>
+        <div class="layer-colorby-options pill-group">
+          <span class="pill on" data-colorby="zone">Zone</span>
+          <span class="pill"    data-colorby="tier">Tier</span>
+          <span class="pill"    data-colorby="none">None</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="zone-summary">
+      <h3>Manager Zone Distribution</h3>
+      <div id="zoneList"></div>
+    </div>
+
+    <div class="total-summary">
+      <strong>Combined Milwaukee + N. Illinois Zone</strong>
+      The Milwaukee account manager covers all of Milwaukee market plus Lake County IL and McHenry County (the northern Illinois suburbs near the WI border).
+    </div>
+
+    <div class="legend-info">
+      <strong>Zone Structure</strong>
+      <div id="zoneStructure" style="margin-top:6px"></div>
+    </div>
+  </aside>
+
+  <main style="position:relative">
+    <div class="stats-bar">
+      <div class="stat">Total locations: <strong id="statTotal">—</strong></div>
+      <div class="stat">Manager zones: <strong id="statZones">—</strong></div>
+      <div class="stat">Avg per zone: <strong id="statAvg">—</strong></div>
+      <div class="stat">Range: <strong id="statRange">—</strong></div>
+      <div class="stat refresh" id="statRefresh"></div>
+    </div>
+    <div id="map"></div>
+    <div class="loading-overlay" id="loading">Loading territory data…</div>
+  </main>
+</div>
+
+<script>
+// ============================================================================
+// CONFIG — paste the published-Sheet CSV URL here when ready to deploy.
+// To get the URL: in Google Sheets, File → Share → Publish to web → CSV → Publish.
+// Use the 'addresses_master' tab. The URL will look like:
+//   https://docs.google.com/spreadsheets/d/e/PUBLISH_ID/pub?gid=0&single=true&output=csv
+// ============================================================================
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTXEdd6ZzZLkfhz-n3HptOnJ_mwVevQeFclKicFpbM4UI4qKP3pa2v_yex3iwdIrpFr1nLmXeOYMeu2/pub?gid=0&single=true&output=csv";
+const ZONES_JSON_URL = "zones.json";  // sibling file in the same Drive folder
+const ZIP_LAYER_URL  = "zip_layer.geojson";  // Day 1B addition; sibling file
+
+// ============================================================================
+// STATE — populated by loadAll() at startup. Don't reference before then.
+// ============================================================================
+let ZONES = {};            // { zone_id: { label, market, color, description, account_manager } }
+let MARKET_VIEWS = {};     // { ALL: { center, zoom }, ... }
+let POLY_OVERLAYS = {};    // { zone_id: [[lat,lng], ...] }
+let ASSIGNMENT_RULES = []; // assignment_rules from zones.json — used to color ZIPs by zone
+let ADDRESSES = [];        // normalized rows with valid lat/lng
+let CURRENT_VIEW = 'ALL';  // last-clicked market button — re-rendering keeps the same view
+
+// ZIP layer state — Day 1B
+let ZIP_LAYER_DATA = null; // raw GeoJSON FeatureCollection, loaded once
+let ZIP_LAYER_GROUP = null; // L.geoJSON layer; null until first render
+let ZIP_LAYER_VISIBLE = false;
+let ZIP_COLOR_BY = 'zone'; // 'zone' | 'tier' | 'none'
+
+// User-controlled filters (compose with the market view).
+// managers/carriers: empty Set = "no filter, show everything in scope".
+// search: lowercased substring; empty = no filter.
+const FILTERS = {
+  managers: new Set(),
+  carriers: new Set(),
+  search: '',
+};
+
+// ============================================================================
+// MAP — initialized immediately so the tile layer paints before data arrives.
+// View is reset once zones.json loads (uses MARKET_VIEWS.ALL).
+// ============================================================================
+const map = L.map('map').setView([38.5, -100], 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 18,
+}).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+const zoneLayer = L.layerGroup().addTo(map);
+
+// ============================================================================
+// BANNER — visible top-of-page error/warn/info messages
+// ============================================================================
+function showBanner(kind, html) {
+  const el = document.getElementById('banner');
+  el.className = kind;
+  el.innerHTML = html;
+}
+function clearBanner() {
+  const el = document.getElementById('banner');
+  el.className = '';
+  el.innerHTML = '';
+}
+
+// ============================================================================
+// LOAD — fetch zones.json + Sheet CSV in parallel, then render
+// ============================================================================
+async function loadAll() {
+  // zones.json must succeed; without it we have no colors, no overlays, nothing.
+  let zonesData;
+  try {
+    const resp = await fetch(ZONES_JSON_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    zonesData = await resp.json();
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    showBanner('error',
+      `<strong>Couldn't load <code>zones.json</code>.</strong> ` +
+      `The map needs this file (in the same folder as <code>map.html</code>) to know zone colors and boundaries. ` +
+      `Error: ${err.message}`);
+    return;
+  }
+
+  ZONES = zonesData.zones || {};
+  MARKET_VIEWS = zonesData.market_views || {
+    'ALL': { center: [38.5, -100], zoom: 4 }
+  };
+  POLY_OVERLAYS = zonesData.polygon_overlays || {};
+  ASSIGNMENT_RULES = zonesData.assignment_rules || [];
+
+  // Day 1B: kick off the ZIP layer fetch in parallel — non-blocking.
+  // If it fails, we just don't show the layer; the map still works.
+  fetchZipLayer();
+
+  // Reset to the proper "ALL" view now that we know it
+  const allView = MARKET_VIEWS['ALL'];
+  if (allView) map.setView(allView.center, allView.zoom);
+
+  // Render the static-but-derived sidebar bits regardless of CSV success
+  renderZoneStructure();
+
+  // CSV failure is non-fatal — we still render an empty map with overlays.
+  if (SHEET_CSV_URL === "PASTE_PUBLISHED_SHEET_CSV_URL_HERE" || !SHEET_CSV_URL) {
+    document.getElementById('loading').style.display = 'none';
+    showBanner('warn',
+      `<strong>No data source configured.</strong> ` +
+      `Open <code>map.html</code> in a text editor and paste the published-Sheet CSV URL into the ` +
+      `<code>SHEET_CSV_URL</code> constant near the top of the &lt;script&gt; block.`);
+    buildFilterControls();
+    showView('ALL');  // overlays only, no pins
+    return;
+  }
+
+  try {
+    const csvText = await fetchCsv(SHEET_CSV_URL);
+    ADDRESSES = parseCsv(csvText);
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    showBanner('error',
+      `<strong>Couldn't load address data from the Sheet.</strong> ` +
+      `Check that the Sheet is still published to web (File → Share → Publish to web) and that the URL in ` +
+      `<code>SHEET_CSV_URL</code> is correct. Error: ${err.message}`);
+    buildFilterControls();
+    showView('ALL');  // overlays only
+    return;
+  }
+
+  document.getElementById('loading').style.display = 'none';
+
+  // Surface a non-fatal warning if the Sheet loaded but had zero usable rows
+  if (ADDRESSES.length === 0) {
+    showBanner('warn',
+      `<strong>The Sheet loaded but no rows have valid coordinates yet.</strong> ` +
+      `Geocoding may still be running — the nightly Apps Script populates lat/lng. Check back later.`);
+  }
+
+  // Refresh timestamp
+  document.getElementById('statRefresh').textContent =
+    `Loaded ${new Date().toLocaleString()}`;
+
+  buildFilterControls();
+  showView('ALL');
+}
+
+function fetchCsv(url) {
+  return new Promise((resolve, reject) => {
+    fetch(url, { cache: 'no-store' })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then(resolve)
+      .catch(reject);
+  });
+}
+
+function parseCsv(csvText) {
+  const result = Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: false,  // keep zips/phones as strings
+  });
+
+  const rows = [];
+  for (const row of result.data) {
+    const lat = parseFloat(row.latitude);
+    const lng = parseFloat(row.longitude);
+    // Silently skip rows without valid coordinates (per spec)
+    if (!isFinite(lat) || !isFinite(lng)) continue;
+    if (lat === 0 && lng === 0) continue;  // common geocode-failure sentinel
+
+    rows.push({
+      lat, lng,
+      address:        (row.address        || '').trim(),
+      city:           (row.city           || '').trim(),
+      state:          (row.state          || '').trim(),
+      zip:            (row.zip            || '').trim(),
+      county:         (row.county         || '').trim(),
+      market:         (row.market         || '').trim(),
+      revenue_tier:   (row.revenue_tier   || '').trim(),
+      industry:       (row.industry       || '').trim(),
+      company_name:   (row.company_name   || '').trim(),
+      contact_name:   (row.contact_name   || '').trim(),
+      contact_phone:  (row.contact_phone  || '').trim(),
+      contact_email:  (row.contact_email  || '').trim(),
+      secondary_phone:(row.secondary_phone|| '').trim(),
+      opportunity_level: (row.opportunity_level || '').trim(),
+      geocode_status: (row.geocode_status || '').trim(),
+      zone_id:        (row.zone_id        || '').trim(),
+      account_manager:(row.account_manager|| '').trim(),
+    });
+  }
+  return rows;
+}
+
+// ============================================================================
+// RENDER — overlays + markers for a given view
+// ============================================================================
+function showView(viewName) {
+  CURRENT_VIEW = viewName;
+  markerLayer.clearLayers();
+  zoneLayer.clearLayers();
+
+  const view = MARKET_VIEWS[viewName] || MARKET_VIEWS['ALL'];
+  if (view) map.setView(view.center, view.zoom);
+
+  if (viewName === 'LOS ANGELES') {
+    drawOverlaysForMarkets(['LOS ANGELES']);
+  } else if (viewName === 'CHICAGO_MIL') {
+    drawOverlaysForMarkets(['CHICAGO', 'MILWAUKEE']);
+  } else {
+    drawOverlaysForMarkets(['LOS ANGELES', 'CHICAGO', 'MILWAUKEE']);
+  }
+
+  applyFiltersAndRender();
+}
+
+// Keeps overlays/zoom unchanged; only redraws the pin layer + sidebar counts.
+// Called by showView() after a market change, and by filter handlers when the
+// user toggles a pill or types in the search box.
+function applyFiltersAndRender() {
+  // 1. Market scope: which rows are eligible based on the active market button.
+  let scope;
+  if (CURRENT_VIEW === 'LOS ANGELES') {
+    scope = ADDRESSES.filter(a => a.market === 'LOS ANGELES');
+  } else if (CURRENT_VIEW === 'CHICAGO_MIL') {
+    scope = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE');
+  } else {
+    scope = ADDRESSES;
+  }
+
+  // 2. User filters: managers, carriers, search box.
+  const toShow = scope.filter(rowMatchesFilters);
+
+  markerLayer.clearLayers();
+  drawMarkers(toShow);
+  updateZoneList(toShow);
+  updateStats(toShow);
+  updateMarketCounts();
+  updateClearLink();
+}
+
+function rowMatchesFilters(a) {
+  if (FILTERS.managers.size > 0 && !FILTERS.managers.has(a.account_manager)) return false;
+  if (FILTERS.carriers.size > 0 && !FILTERS.carriers.has(a.industry)) return false;
+  if (FILTERS.search) {
+    const q = FILTERS.search;
+    const hay = [
+      a.zip, a.city, a.state, a.contact_name, a.company_name,
+    ].join(' ').toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function drawOverlaysForMarkets(markets) {
+  // Loop polygon_overlays from zones.json. Filter to zones whose market is in scope.
+  for (const [zoneId, polygon] of Object.entries(POLY_OVERLAYS)) {
+    if (zoneId.startsWith('_')) continue;  // skip _comment
+    const zone = ZONES[zoneId];
+    if (!zone) continue;
+    if (!markets.includes(zone.market)) continue;
+
+    // Milwaukee + N. IL polygon should render in CHICAGO_MIL view
+    L.polygon(polygon, {
+      color: zone.color,
+      weight: 2,
+      fillColor: zone.color,
+      fillOpacity: 0.08,
+      dashArray: '6,4',
+    }).bindTooltip(zone.label, { sticky: true })
+      .addTo(zoneLayer);
+  }
+}
+
+function drawMarkers(addrs) {
+  // Stack-offset for pins at the same coordinate (golden-angle spiral, copied from v2)
+  const positionCounts = {};
+  addrs.forEach(a => {
+    const key = `${a.lat.toFixed(3)},${a.lng.toFixed(3)}`;
+    const offset = (positionCounts[key] || 0);
+    positionCounts[key] = offset + 1;
+
+    const angle = (offset * 137.5) * Math.PI / 180;
+    const radius = offset === 0 ? 0 : 0.003 * Math.sqrt(offset);
+    const lat = a.lat + radius * Math.cos(angle);
+    const lng = a.lng + radius * Math.sin(angle);
+
+    const zone = ZONES[a.zone_id];
+    const color = zone ? zone.color : '#9ca3af';  // gray for unassigned
+
+    const marker = L.circleMarker([lat, lng], {
+      radius: 4,
+      fillColor: color,
+      color: 'white',
+      weight: 1,
+      fillOpacity: 0.85,
+    });
+
+    marker.bindPopup(buildPopup(a));
+    marker.addTo(markerLayer);
+  });
+}
+
+function buildPopup(a) {
+  const zone = ZONES[a.zone_id];
+  const zoneLabel = zone ? zone.label : (a.zone_id || 'Unassigned');
+  const zoneColor = zone ? zone.color : '#9ca3af';
+
+  // Heading: company name (with industry-based fallback so old rows don't look broken)
+  const heading = a.company_name || (a.industry ? `${a.industry} location` : 'Retail location');
+
+  // Address block: line 1 = street, line 2 = "city, state zip"
+  const cityStateZip = [a.city, a.state].filter(Boolean).join(', ') + (a.zip ? ' ' + a.zip : '');
+  const out = [];
+  out.push(`<div class="pop-company">${escapeHtml(heading)}</div>`);
+
+  // ---- CONTACT ----
+  const contactBits = [];
+  if (a.contact_name)    contactBits.push(`<div class="pop-line">${escapeHtml(a.contact_name)}</div>`);
+  if (a.contact_phone)   contactBits.push(`<div class="pop-line"><span class="lbl">Tel</span>${escapeHtml(a.contact_phone)}</div>`);
+  if (a.secondary_phone) contactBits.push(`<div class="pop-line"><span class="lbl">Alt</span>${escapeHtml(a.secondary_phone)}</div>`);
+  if (a.contact_email)   contactBits.push(`<div class="pop-line"><span class="lbl">@</span>${escapeHtml(a.contact_email)}</div>`);
+  if (contactBits.length) {
+    out.push(`<div class="pop-section"><div class="pop-section-label">Contact</div>${contactBits.join('')}</div>`);
+  }
+
+  // ---- LOCATION ----
+  const locBits = [];
+  if (a.address)      locBits.push(`<div class="pop-line">${escapeHtml(a.address)}</div>`);
+  if (cityStateZip)   locBits.push(`<div class="pop-line">${escapeHtml(cityStateZip)}</div>`);
+  if (a.county)       locBits.push(`<div class="pop-line"><span class="lbl">County</span>${escapeHtml(a.county)}</div>`);
+  if (a.market)       locBits.push(`<div class="pop-line"><span class="lbl">Market</span>${escapeHtml(a.market)}</div>`);
+  if (locBits.length) {
+    out.push(`<div class="pop-section"><div class="pop-section-label">Location</div>${locBits.join('')}</div>`);
+  }
+
+  // ---- ACCOUNT META (tags row) ----
+  const tags = [];
+  if (a.industry)          tags.push(`<span class="pop-tag">${escapeHtml(a.industry)}</span>`); // displayed as carrier
+  if (a.revenue_tier)      tags.push(`<span class="pop-tag">${escapeHtml(a.revenue_tier)}</span>`);
+  if (a.opportunity_level) tags.push(`<span class="pop-tag">Opp: ${escapeHtml(a.opportunity_level)}</span>`);
+  tags.push(`<span class="popup-zone" style="background:${zoneColor}">${escapeHtml(zoneLabel)}</span>`);
+  out.push(`<div class="pop-meta-row">${tags.join('')}</div>`);
+
+  return out.join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================================
+// SIDEBAR — zone distribution, structure legend, market counts, stats bar
+// ============================================================================
+function updateZoneList(addrs) {
+  // Count by zone_id
+  const counts = {};
+  addrs.forEach(a => {
+    const zid = a.zone_id || '__unassigned';
+    counts[zid] = (counts[zid] || 0) + 1;
+  });
+
+  // Order: LA zones, Chicago zones, Milwaukee, then anything else (incl unassigned)
+  const knownIds = Object.keys(ZONES);
+  const laIds = knownIds.filter(id => ZONES[id].market === 'LOS ANGELES');
+  const chiIds = knownIds.filter(id => ZONES[id].market === 'CHICAGO');
+  const milIds = knownIds.filter(id => ZONES[id].market === 'MILWAUKEE');
+  const orderedIds = [...laIds, ...chiIds, ...milIds];
+
+  const list = document.getElementById('zoneList');
+  list.innerHTML = '';
+
+  orderedIds.forEach(zid => {
+    if (!counts[zid]) return;
+    const zone = ZONES[zid];
+    const row = document.createElement('div');
+    row.className = 'zone-row';
+    row.innerHTML = `
+      <div class="zone-swatch" style="background:${zone.color}"></div>
+      <div class="zone-name">${escapeHtml(zone.label)}<div class="sub">${escapeHtml(zone.account_manager || '')}</div></div>
+      <div class="zone-count">${counts[zid]}</div>
+    `;
+    list.appendChild(row);
+  });
+
+  // Show unassigned bucket if present so it's not invisible
+  if (counts['__unassigned']) {
+    const row = document.createElement('div');
+    row.className = 'zone-row';
+    row.innerHTML = `
+      <div class="zone-swatch" style="background:#9ca3af"></div>
+      <div class="zone-name">Unassigned<div class="sub">No zone_id in Sheet</div></div>
+      <div class="zone-count">${counts['__unassigned']}</div>
+    `;
+    list.appendChild(row);
+  }
+}
+
+function renderZoneStructure() {
+  // Derive "LA: 4 zones, Chicago: 2 zones, Milwaukee: 1 zone, N managers total" from zones.json
+  const byMarket = {};
+  Object.values(ZONES).forEach(z => {
+    byMarket[z.market] = (byMarket[z.market] || 0) + 1;
+  });
+  const total = Object.values(ZONES).length;
+
+  const lines = [];
+  if (byMarket['LOS ANGELES']) lines.push(`<div>• <b>LA:</b> ${byMarket['LOS ANGELES']} zones</div>`);
+  if (byMarket['CHICAGO'])     lines.push(`<div>• <b>Chicago:</b> ${byMarket['CHICAGO']} zones</div>`);
+  if (byMarket['MILWAUKEE'])   lines.push(`<div>• <b>Milwaukee + N. IL:</b> ${byMarket['MILWAUKEE']} zone${byMarket['MILWAUKEE']>1?'s':''}</div>`);
+  lines.push(`<div style="margin-top:6px"><b>${total} managers total</b></div>`);
+
+  document.getElementById('zoneStructure').innerHTML = lines.join('');
+}
+
+function updateStats(addrs) {
+  document.getElementById('statTotal').textContent = addrs.length.toLocaleString();
+
+  // Count zones present in the data
+  const zonesPresent = new Set(addrs.map(a => a.zone_id).filter(Boolean));
+  document.getElementById('statZones').textContent = zonesPresent.size || '—';
+
+  if (zonesPresent.size === 0 || addrs.length === 0) {
+    document.getElementById('statAvg').textContent = '—';
+    document.getElementById('statRange').textContent = '—';
+    return;
+  }
+
+  const counts = {};
+  addrs.forEach(a => { if (a.zone_id) counts[a.zone_id] = (counts[a.zone_id] || 0) + 1; });
+  const values = Object.values(counts);
+  const avg = Math.round(addrs.length / zonesPresent.size);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  document.getElementById('statAvg').textContent = `~${avg}`;
+  document.getElementById('statRange').textContent = min === max ? `${min}` : `${min} – ${max}`;
+}
+
+function updateMarketCounts() {
+  // Update the small numbers next to each market button
+  const all = ADDRESSES.length;
+  const la = ADDRESSES.filter(a => a.market === 'LOS ANGELES').length;
+  const cm = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE').length;
+  document.querySelector('[data-count="ALL"]').textContent = all.toLocaleString();
+  document.querySelector('[data-count="LOS ANGELES"]').textContent = la.toLocaleString();
+  document.querySelector('[data-count="CHICAGO_MIL"]').textContent = cm.toLocaleString();
+}
+
+// ============================================================================
+// FILTERS — sidebar pill controls for managers, carriers, and search
+// ============================================================================
+function buildFilterControls() {
+  // ---- Manager pills, ordered like the zone list (LA, Chicago, Milwaukee) ----
+  const managerEntries = [];
+  const seen = new Set();
+  const ordered = ['LOS ANGELES', 'CHICAGO', 'MILWAUKEE'];
+  ordered.forEach(market => {
+    Object.values(ZONES).forEach(z => {
+      if (z.market !== market) return;
+      const name = z.account_manager;
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      managerEntries.push({ name, color: z.color });
+    });
+  });
+
+  const mgrEl = document.getElementById('filterManagers');
+  mgrEl.innerHTML = '';
+  managerEntries.forEach(({ name, color }) => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'pill';
+    pill.dataset.kind = 'manager';
+    pill.dataset.value = name;
+    pill.dataset.color = color;
+    pill.textContent = name;
+    pill.addEventListener('click', () => togglePill('managers', name, color, pill));
+    mgrEl.appendChild(pill);
+  });
+
+  // ---- Carrier pills, derived from the data so anything in the Sheet shows up ----
+  const carriers = Array.from(new Set(
+    ADDRESSES.map(a => a.industry).filter(Boolean)
+  )).sort();
+
+  const carEl = document.getElementById('filterCarriers');
+  carEl.innerHTML = '';
+  if (carriers.length === 0) {
+    carEl.innerHTML = '<div style="font-size:11px; color:#9ca3af; font-style:italic">No carriers loaded yet</div>';
+  } else {
+    carriers.forEach(carrier => {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'pill';
+      pill.dataset.kind = 'carrier';
+      pill.dataset.value = carrier;
+      pill.textContent = carrier;
+      pill.addEventListener('click', () => togglePill('carriers', carrier, '#1f2937', pill));
+      carEl.appendChild(pill);
+    });
+  }
+}
+
+function togglePill(setName, value, color, el) {
+  const set = FILTERS[setName];
+  if (set.has(value)) {
+    set.delete(value);
+    el.classList.remove('on');
+    el.style.background = '';
+  } else {
+    set.add(value);
+    el.classList.add('on');
+    el.style.background = color;
+  }
+  applyFiltersAndRender();
+}
+
+function clearAllFilters() {
+  FILTERS.managers.clear();
+  FILTERS.carriers.clear();
+  FILTERS.search = '';
+  document.getElementById('filterSearch').value = '';
+  document.querySelectorAll('.pill.on').forEach(p => {
+    p.classList.remove('on');
+    p.style.background = '';
+  });
+  applyFiltersAndRender();
+}
+
+function updateClearLink() {
+  const link = document.getElementById('clearFilters');
+  const anyActive =
+    FILTERS.managers.size > 0 ||
+    FILTERS.carriers.size > 0 ||
+    FILTERS.search.length > 0;
+  link.classList.toggle('disabled', !anyActive);
+}
+
+// ============================================================================
+// ZIP LAYER (Day 1B) — separate module, self-contained
+// Renders zip_layer.geojson under the pin layer, with toggleable visibility
+// and a "color by" selector (zone/tier/none).
+// ============================================================================
+
+async function fetchZipLayer() {
+  try {
+    const resp = await fetch(ZIP_LAYER_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    ZIP_LAYER_DATA = await resp.json();
+    const meta = document.getElementById('zipLayerMeta');
+    if (meta) {
+      const n = (ZIP_LAYER_DATA.features || []).length;
+      meta.textContent = `${n.toLocaleString()} ZIPs`;
+    }
+  } catch (err) {
+    // Non-fatal: disable the toggle and leave a hint.
+    const tog = document.getElementById('toggleZipLayer');
+    if (tog) tog.disabled = true;
+    const meta = document.getElementById('zipLayerMeta');
+    if (meta) meta.textContent = 'unavailable';
+    console.warn('ZIP layer not loaded:', err);
+  }
+}
+
+// Pre-compute centroid of a Polygon/MultiPolygon GeoJSON geometry.
+// Used for assigning a ZIP to a zone (we ask: which zone is this ZIP's center in?).
+function geomCentroid(geom) {
+  let sx = 0, sy = 0, n = 0;
+  function walk(c) {
+    if (typeof c[0] === 'number') { sx += c[0]; sy += c[1]; n++; }
+    else { for (const p of c) walk(p); }
+  }
+  walk(geom.coordinates);
+  return n ? [sx / n, sy / n] : null;
+}
+
+// Ray-casting point-in-polygon. Polygon is [[lat,lng], ...] (the format used
+// by zones.json's assignment_rules.params.polygon).
+function pointInLatLngPolygon(lat, lng, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [yi, xi] = polygon[i];
+    const [yj, xj] = polygon[j];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Port of the Apps Script assignZone_ logic, JS-side, for ZIP-feature properties.
+// Returns a zone_id or null. Mirrors zones.json assignment_rules dispatch.
+// The Apps Script version operates on an address row; this version operates on
+// a ZIP's properties + centroid, which are what we have in the GeoJSON.
+function assignZoneForZip(zipProps, centroidLatLng) {
+  // Derive a "market" for this ZIP from its state, since the GeoJSON doesn't
+  // carry a market field. Mirrors the markets used in zones.json.
+  const stateToMarket = { CA: 'LOS ANGELES', IL: 'CHICAGO', IN: 'CHICAGO', WI: 'MILWAUKEE' };
+  const market = stateToMarket[zipProps.state] || null;
+  const stateFull = { CA: 'California', IL: 'Illinois', IN: 'Indiana', WI: 'Wisconsin' }[zipProps.state] || zipProps.state;
+
+  for (const rule of ASSIGNMENT_RULES) {
+    const m = rule.match || {};
+    if (m.market && m.market !== market) continue;
+    if (m.state && m.state !== stateFull) continue;
+
+    if (rule.type === 'polygon') {
+      const poly = rule.params && rule.params.polygon;
+      if (!poly) continue;
+      if (pointInLatLngPolygon(centroidLatLng[0], centroidLatLng[1], poly)) {
+        return rule.assign_zone_id;
+      }
+    } else if (rule.type === 'market_match') {
+      // Already filtered by m.market above; if we got here and there's no further
+      // qualifier, the rule wins.
+      return rule.assign_zone_id;
+    } else if (rule.type === 'county_list') {
+      const counties = (rule.params && rule.params.counties) || [];
+      // zip_tier_list says e.g. "Lake County" — same convention as zones.json.
+      if (counties.some(c => (zipProps.county || '').toLowerCase() === c.toLowerCase())) {
+        return rule.assign_zone_id;
+      }
+    }
+    // Other rule types (quadrant_split, lat_band) aren't currently used in
+    // zones.json v1.3 but the Apps Script supports them. If they appear later,
+    // this function should be extended.
+  }
+  return null;
+}
+
+// Tier color mapping. With the current data every ZIP in our DMAs is Tier 1,
+// but we set up the logic to handle Tier 2/3 if they appear later.
+const TIER_COLORS = {
+  'Tier 1': '#dc2626',  // red
+  'Tier 2': '#f59e0b',  // amber
+  'Tier 3': '#10b981',  // green
+};
+
+function styleZipFeature(feat) {
+  // Returns a Leaflet path style based on the active color-by mode.
+  const baseStyle = {
+    weight: 0.6,
+    color: '#6b7280',     // outline color
+    fillOpacity: 0.0,     // overridden below per mode
+    fillColor: '#9ca3af', // overridden below per mode
+  };
+
+  if (ZIP_COLOR_BY === 'none') {
+    return { ...baseStyle, fillOpacity: 0, color: '#9ca3af', weight: 0.5 };
+  }
+
+  if (ZIP_COLOR_BY === 'tier') {
+    const tier = feat.properties.tier;
+    const color = TIER_COLORS[tier];
+    if (!color) {
+      return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
+    }
+    return { ...baseStyle, fillOpacity: 0.25, fillColor: color, color: color };
+  }
+
+  // 'zone' mode: assign zone via ASSIGNMENT_RULES, color by zone.color.
+  // We cache the assignment on the feature so we don't recompute on restyle.
+  if (!('_zoneCached' in feat.properties)) {
+    const c = geomCentroid(feat.geometry);
+    feat.properties._zoneCached = c ? assignZoneForZip(feat.properties, [c[1], c[0]]) : null;
+    // Note: GeoJSON coords are [lng,lat]; centroid returns [lng,lat]; the rule
+    // polygons in zones.json are [lat,lng]. We swap above.
+  }
+  const zoneId = feat.properties._zoneCached;
+  const zone = zoneId ? ZONES[zoneId] : null;
+  if (!zone) {
+    return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
+  }
+  return { ...baseStyle, fillOpacity: 0.25, fillColor: zone.color, color: zone.color };
+}
+
+function renderZipLayer() {
+  // Remove the existing layer (if any), then add a fresh one if visible.
+  if (ZIP_LAYER_GROUP) {
+    map.removeLayer(ZIP_LAYER_GROUP);
+    ZIP_LAYER_GROUP = null;
+  }
+  if (!ZIP_LAYER_VISIBLE || !ZIP_LAYER_DATA) return;
+
+  ZIP_LAYER_GROUP = L.geoJSON(ZIP_LAYER_DATA, {
+    style: styleZipFeature,
+    onEachFeature: (feat, layer) => {
+      const p = feat.properties;
+      const zoneId = p._zoneCached;
+      const zone = zoneId ? ZONES[zoneId] : null;
+      const lines = [
+        `<strong>${p.zip}</strong> — ${p.city || '?'}, ${p.state || '?'}`,
+        `${p.county || ''}`,
+        `Tier: ${p.tier || '—'}`,
+        `Zone: ${zone ? zone.label : '(unassigned)'}`,
+      ];
+      layer.bindTooltip(lines.join('<br>'), { sticky: true });
+    },
+  });
+
+  // Add to map BELOW pins and zone overlays. We do this by adding it first
+  // (Leaflet z-orders by add-time) and then re-adding markerLayer/zoneLayer.
+  ZIP_LAYER_GROUP.addTo(map);
+  // Re-add pins + zone overlays so they paint above the ZIP layer.
+  if (map.hasLayer(zoneLayer)) { map.removeLayer(zoneLayer); zoneLayer.addTo(map); }
+  if (map.hasLayer(markerLayer)) { map.removeLayer(markerLayer); markerLayer.addTo(map); }
+}
+
+function setZipLayerVisible(visible) {
+  ZIP_LAYER_VISIBLE = !!visible;
+  const block = document.getElementById('zipColorByBlock');
+  if (block) block.setAttribute('aria-disabled', visible ? 'false' : 'true');
+  renderZipLayer();
+}
+
+function setZipColorBy(mode) {
+  if (!['zone', 'tier', 'none'].includes(mode)) return;
+  ZIP_COLOR_BY = mode;
+  // Update pill UI
+  document.querySelectorAll('.layer-colorby-options .pill').forEach(p => {
+    p.classList.toggle('on', p.dataset.colorby === mode);
+  });
+  // If the layer is currently visible, restyle in place (cheaper than re-add)
+  if (ZIP_LAYER_GROUP) {
+    ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+  }
+}
+
+
+document.querySelectorAll('.market-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    showView(btn.dataset.view);
+  });
+});
+
+document.getElementById('filterSearch').addEventListener('input', e => {
+  FILTERS.search = e.target.value.trim().toLowerCase();
+  applyFiltersAndRender();
+});
+
+document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
+
+// ZIP layer toggle (Day 1B)
+document.getElementById('toggleZipLayer').addEventListener('change', e => {
+  setZipLayerVisible(e.target.checked);
+});
+
+// ZIP layer "Color by" pills (Day 1B)
+document.querySelectorAll('.layer-colorby-options .pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    setZipColorBy(pill.dataset.colorby);
+  });
+});
+
+loadAll();
+</script>
+
+</body>
+</html>
