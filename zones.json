@@ -78,6 +78,34 @@
   },
   "assignment_rules": [
     {
+      "rule_id": "manual_zip_overrides",
+      "type": "zip_list",
+      "description": "Manual ZIP-level assignments for the 39 ZIPs that fell outside every zone polygon. Added 2026-05-07 to give the map full-coverage coloring. Geographic logic: Albert gets high desert (Inyo County, far-north SBD desert, Tujunga/La Crescenta NE Valley, Point Mugu Ventura). Alex gets Catalina Island (coast). Zoila gets eastern SBD / Colorado River corridor (Needles, Baker, Essex, Nipton, Earp, Parker Dam, Vidal) and San Clemente south OC. Chicago-CENTRAL gets 4 LaSalle County rural IL ZIPs. Chicago-SOUTH gets 10 NW Indiana edge ZIPs. Evaluated FIRST so it wins over the polygon rules.",
+      "params": {
+        "zips": {
+          "LA-Albert": [
+            "91042", "91214",
+            "92328", "92384", "92389", "93513", "93514", "93522", "93526", "93530", "93545", "93549",
+            "93558", "93562", "92310",
+            "93042"
+          ],
+          "LA-Alex": [
+            "90704"
+          ],
+          "LA-Zoila": [
+            "92242", "92267", "92280", "92309", "92332", "92363", "92364",
+            "92672"
+          ],
+          "Chicago-CENTRAL": [
+            "61316", "61321", "61354", "61358"
+          ],
+          "Chicago-SOUTH": [
+            "46346", "46365", "46371", "47922", "47948", "47951", "47963", "47964", "47977", "47978"
+          ]
+        }
+      }
+    },
+    {
       "rule_id": "la_albert",
       "type": "polygon",
       "match": {

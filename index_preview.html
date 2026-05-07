@@ -152,19 +152,6 @@
   .layer-toggle .layer-meta {
     margin-left: auto; font-size: 11px; color: #9ca3af; font-weight: 400;
   }
-  .layer-colorby {
-    margin-top: 8px;
-    padding: 8px 10px;
-    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
-    font-size: 12px;
-  }
-  .layer-colorby-label {
-    font-size: 11px; font-weight: 600; color: #374151;
-    text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;
-  }
-  .layer-colorby-options { display: flex; gap: 4px; }
-  .layer-colorby-options .pill { flex: 1; text-align: center; }
-  .layer-colorby[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
 
   /* ---- Filters (sidebar) ---- */
   .filters { margin-bottom: 24px; }
@@ -334,6 +321,13 @@
     color: #6b7280;
     z-index: 1000;
   }
+
+  /* Suppress the browser's default keyboard-focus outline on Leaflet's
+     interactive paths (ZIP polygons + zone overlays). Without this, clicking
+     a polygon shows a black rectangle around its bounding box on Chrome —
+     confusing visual noise that doesn't help users navigate the map. */
+  .leaflet-interactive:focus { outline: none; }
+  path.leaflet-interactive:focus { outline: none; }
 </style>
 </head>
 <body>
@@ -387,18 +381,10 @@
     <div class="layers-block">
       <h3>Map Layers</h3>
       <label class="layer-toggle" for="toggleZipLayer">
-        <input type="checkbox" id="toggleZipLayer">
+        <input type="checkbox" id="toggleZipLayer" checked>
         ZIP boundaries
         <span class="layer-meta" id="zipLayerMeta">—</span>
       </label>
-      <div class="layer-colorby" id="zipColorByBlock" aria-disabled="true">
-        <div class="layer-colorby-label">Color ZIPs by</div>
-        <div class="layer-colorby-options pill-group">
-          <span class="pill on" data-colorby="zone">Zone</span>
-          <span class="pill"    data-colorby="tier">Tier</span>
-          <span class="pill"    data-colorby="none">None</span>
-        </div>
-      </div>
     </div>
 
     <div class="zone-summary">
@@ -454,8 +440,7 @@ let CURRENT_VIEW = 'ALL';  // last-clicked market button — re-rendering keeps 
 // ZIP layer state — Day 1B
 let ZIP_LAYER_DATA = null; // raw GeoJSON FeatureCollection, loaded once
 let ZIP_LAYER_GROUP = null; // L.geoJSON layer; null until first render
-let ZIP_LAYER_VISIBLE = false;
-let ZIP_COLOR_BY = 'zone'; // 'zone' | 'tier' | 'none'
+let ZIP_LAYER_VISIBLE = true; // on by default; user can hide via the checkbox
 
 // User-controlled filters (compose with the market view).
 // managers/carriers: empty Set = "no filter, show everything in scope".
@@ -986,10 +971,18 @@ async function fetchZipLayer() {
       const n = (ZIP_LAYER_DATA.features || []).length;
       meta.textContent = `${n.toLocaleString()} ZIPs`;
     }
+    // If the toggle is on (default state in Day 1B polish), render now that
+    // we have the data. The toggle is set in the HTML and ZIP_LAYER_VISIBLE
+    // is initialized to true to match.
+    if (ZIP_LAYER_VISIBLE) renderZipLayer();
   } catch (err) {
     // Non-fatal: disable the toggle and leave a hint.
     const tog = document.getElementById('toggleZipLayer');
-    if (tog) tog.disabled = true;
+    if (tog) {
+      tog.disabled = true;
+      tog.checked = false;
+    }
+    ZIP_LAYER_VISIBLE = false;
     const meta = document.getElementById('zipLayerMeta');
     if (meta) meta.textContent = 'unavailable';
     console.warn('ZIP layer not loaded:', err);
@@ -1038,7 +1031,17 @@ function assignZoneForZip(zipProps, centroidLatLng) {
     if (m.market && m.market !== market) continue;
     if (m.state && m.state !== stateFull) continue;
 
-    if (rule.type === 'polygon') {
+    if (rule.type === 'zip_list') {
+      // params.zips is { zone_id: ["12345", ...], ... }
+      // First zone whose list contains this ZIP wins. Whitespace-trimmed for safety.
+      const zipMap = (rule.params && rule.params.zips) || {};
+      const z = (zipProps.zip || '').trim();
+      if (!z) continue;
+      for (const [zoneId, zips] of Object.entries(zipMap)) {
+        if (zips.includes(z)) return zoneId;
+      }
+      continue;
+    } else if (rule.type === 'polygon') {
       const poly = rule.params && rule.params.polygon;
       if (!poly) continue;
       if (pointInLatLngPolygon(centroidLatLng[0], centroidLatLng[1], poly)) {
@@ -1062,38 +1065,19 @@ function assignZoneForZip(zipProps, centroidLatLng) {
   return null;
 }
 
-// Tier color mapping. With the current data every ZIP in our DMAs is Tier 1,
-// but we set up the logic to handle Tier 2/3 if they appear later.
-const TIER_COLORS = {
-  'Tier 1': '#dc2626',  // red
-  'Tier 2': '#f59e0b',  // amber
-  'Tier 3': '#10b981',  // green
-};
-
 function styleZipFeature(feat) {
-  // Returns a Leaflet path style based on the active color-by mode.
+  // Always color by zone. The previous Tier and None modes were removed in
+  // Day 1B polish; every ZIP in the current DMAs is Tier 1, so Tier mode
+  // produced a uniform red wash with no information value.
   const baseStyle = {
     weight: 0.6,
-    color: '#6b7280',     // outline color
-    fillOpacity: 0.0,     // overridden below per mode
-    fillColor: '#9ca3af', // overridden below per mode
+    color: '#6b7280',     // outline color (overridden below to match fill)
+    fillOpacity: 0.0,
+    fillColor: '#9ca3af',
   };
 
-  if (ZIP_COLOR_BY === 'none') {
-    return { ...baseStyle, fillOpacity: 0, color: '#9ca3af', weight: 0.5 };
-  }
-
-  if (ZIP_COLOR_BY === 'tier') {
-    const tier = feat.properties.tier;
-    const color = TIER_COLORS[tier];
-    if (!color) {
-      return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
-    }
-    return { ...baseStyle, fillOpacity: 0.25, fillColor: color, color: color };
-  }
-
-  // 'zone' mode: assign zone via ASSIGNMENT_RULES, color by zone.color.
-  // We cache the assignment on the feature so we don't recompute on restyle.
+  // Cache the zone assignment on the feature so we don't recompute on every
+  // restyle (e.g., if we ever reintroduce a mode toggle).
   if (!('_zoneCached' in feat.properties)) {
     const c = geomCentroid(feat.geometry);
     feat.properties._zoneCached = c ? assignZoneForZip(feat.properties, [c[1], c[0]]) : null;
@@ -1103,6 +1087,8 @@ function styleZipFeature(feat) {
   const zoneId = feat.properties._zoneCached;
   const zone = zoneId ? ZONES[zoneId] : null;
   if (!zone) {
+    // Should be empty after the Day 1B manual_zip_overrides rule, but kept as
+    // a safety net for any future ZIP added to the GeoJSON without a zone.
     return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
   }
   return { ...baseStyle, fillOpacity: 0.25, fillColor: zone.color, color: zone.color };
@@ -1142,22 +1128,7 @@ function renderZipLayer() {
 
 function setZipLayerVisible(visible) {
   ZIP_LAYER_VISIBLE = !!visible;
-  const block = document.getElementById('zipColorByBlock');
-  if (block) block.setAttribute('aria-disabled', visible ? 'false' : 'true');
   renderZipLayer();
-}
-
-function setZipColorBy(mode) {
-  if (!['zone', 'tier', 'none'].includes(mode)) return;
-  ZIP_COLOR_BY = mode;
-  // Update pill UI
-  document.querySelectorAll('.layer-colorby-options .pill').forEach(p => {
-    p.classList.toggle('on', p.dataset.colorby === mode);
-  });
-  // If the layer is currently visible, restyle in place (cheaper than re-add)
-  if (ZIP_LAYER_GROUP) {
-    ZIP_LAYER_GROUP.setStyle(styleZipFeature);
-  }
 }
 
 
@@ -1179,13 +1150,6 @@ document.getElementById('clearFilters').addEventListener('click', clearAllFilter
 // ZIP layer toggle (Day 1B)
 document.getElementById('toggleZipLayer').addEventListener('change', e => {
   setZipLayerVisible(e.target.checked);
-});
-
-// ZIP layer "Color by" pills (Day 1B)
-document.querySelectorAll('.layer-colorby-options .pill').forEach(pill => {
-  pill.addEventListener('click', () => {
-    setZipColorBy(pill.dataset.colorby);
-  });
 });
 
 loadAll();
