@@ -670,7 +670,13 @@ function rowMatchesFilters(a) {
 }
 
 function drawOverlaysForMarkets(markets) {
-  // Loop polygon_overlays from zones.json. Filter to zones whose market is in scope.
+  // v1.4 (Day 3 / Option B): Dashed cosmetic zone overlays are hidden. The
+  // colored ZIP layer now communicates territory boundaries directly, and
+  // the dashed outlines added redundant visual noise (and the click-focus
+  // black rectangle issue). polygon_overlays data is still preserved in
+  // zones.json in case anyone wants to flip this back on later.
+  return;
+  // eslint-disable-next-line no-unreachable
   for (const [zoneId, polygon] of Object.entries(POLY_OVERLAYS)) {
     if (zoneId.startsWith('_')) continue;  // skip _comment
     const zone = ZONES[zoneId];
