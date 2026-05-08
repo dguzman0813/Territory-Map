@@ -136,6 +136,23 @@
   }
   .legend-info strong { display: block; margin-bottom: 4px; color: #075985; }
 
+  /* ---- Layers section (sidebar) — Day 1B addition ---- */
+  .layers-block { margin-bottom: 24px; }
+  .layers-block h3 {
+    font-size: 12px; text-transform: uppercase; color: #6b7280;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .layer-toggle {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; margin-bottom: 6px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 13px; color: #374151; cursor: pointer; user-select: none;
+  }
+  .layer-toggle input[type="checkbox"] { margin: 0; cursor: pointer; }
+  .layer-toggle .layer-meta {
+    margin-left: auto; font-size: 11px; color: #9ca3af; font-weight: 400;
+  }
+
   /* ---- Filters (sidebar) ---- */
   .filters { margin-bottom: 24px; }
   .filters h3 {
@@ -304,6 +321,13 @@
     color: #6b7280;
     z-index: 1000;
   }
+
+  /* Suppress the browser's default keyboard-focus outline on Leaflet's
+     interactive paths (ZIP polygons + zone overlays). Without this, clicking
+     a polygon shows a black rectangle around its bounding box on Chrome —
+     confusing visual noise that doesn't help users navigate the map. */
+  .leaflet-interactive:focus { outline: none; }
+  path.leaflet-interactive:focus { outline: none; }
 </style>
 </head>
 <body>
@@ -354,6 +378,15 @@
       </div>
     </div>
 
+    <div class="layers-block">
+      <h3>Map Layers</h3>
+      <label class="layer-toggle" for="toggleZipLayer">
+        <input type="checkbox" id="toggleZipLayer" checked>
+        ZIP boundaries
+        <span class="layer-meta" id="zipLayerMeta">—</span>
+      </label>
+    </div>
+
     <div class="zone-summary">
       <h3>Manager Zone Distribution</h3>
       <div id="zoneList"></div>
@@ -392,6 +425,7 @@
 // ============================================================================
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTXEdd6ZzZLkfhz-n3HptOnJ_mwVevQeFclKicFpbM4UI4qKP3pa2v_yex3iwdIrpFr1nLmXeOYMeu2/pub?gid=0&single=true&output=csv";
 const ZONES_JSON_URL = "zones.json";  // sibling file in the same Drive folder
+const ZIP_LAYER_URL  = "zip_layer.geojson";  // Day 1B addition; sibling file
 
 // ============================================================================
 // STATE — populated by loadAll() at startup. Don't reference before then.
@@ -399,8 +433,14 @@ const ZONES_JSON_URL = "zones.json";  // sibling file in the same Drive folder
 let ZONES = {};            // { zone_id: { label, market, color, description, account_manager } }
 let MARKET_VIEWS = {};     // { ALL: { center, zoom }, ... }
 let POLY_OVERLAYS = {};    // { zone_id: [[lat,lng], ...] }
+let ASSIGNMENT_RULES = []; // assignment_rules from zones.json — used to color ZIPs by zone
 let ADDRESSES = [];        // normalized rows with valid lat/lng
 let CURRENT_VIEW = 'ALL';  // last-clicked market button — re-rendering keeps the same view
+
+// ZIP layer state — Day 1B
+let ZIP_LAYER_DATA = null; // raw GeoJSON FeatureCollection, loaded once
+let ZIP_LAYER_GROUP = null; // L.geoJSON layer; null until first render
+let ZIP_LAYER_VISIBLE = true; // on by default; user can hide via the checkbox
 
 // User-controlled filters (compose with the market view).
 // managers/carriers: empty Set = "no filter, show everything in scope".
@@ -462,6 +502,11 @@ async function loadAll() {
     'ALL': { center: [38.5, -100], zoom: 4 }
   };
   POLY_OVERLAYS = zonesData.polygon_overlays || {};
+  ASSIGNMENT_RULES = zonesData.assignment_rules || [];
+
+  // Day 1B: kick off the ZIP layer fetch in parallel — non-blocking.
+  // If it fails, we just don't show the layer; the map still works.
+  fetchZipLayer();
 
   // Reset to the proper "ALL" view now that we know it
   const allView = MARKET_VIEWS['ALL'];
@@ -625,7 +670,13 @@ function rowMatchesFilters(a) {
 }
 
 function drawOverlaysForMarkets(markets) {
-  // Loop polygon_overlays from zones.json. Filter to zones whose market is in scope.
+  // v1.4 (Day 3 / Option B): Dashed cosmetic zone overlays are hidden. The
+  // colored ZIP layer now communicates territory boundaries directly, and
+  // the dashed outlines added redundant visual noise (and the click-focus
+  // black rectangle issue). polygon_overlays data is still preserved in
+  // zones.json in case anyone wants to flip this back on later.
+  return;
+  // eslint-disable-next-line no-unreachable
   for (const [zoneId, polygon] of Object.entries(POLY_OVERLAYS)) {
     if (zoneId.startsWith('_')) continue;  // skip _comment
     const zone = ZONES[zoneId];
@@ -911,8 +962,182 @@ function updateClearLink() {
 }
 
 // ============================================================================
-// WIRING
+// ZIP LAYER (Day 1B) — separate module, self-contained
+// Renders zip_layer.geojson under the pin layer, with toggleable visibility
+// and a "color by" selector (zone/tier/none).
 // ============================================================================
+
+async function fetchZipLayer() {
+  try {
+    const resp = await fetch(ZIP_LAYER_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    ZIP_LAYER_DATA = await resp.json();
+    const meta = document.getElementById('zipLayerMeta');
+    if (meta) {
+      const n = (ZIP_LAYER_DATA.features || []).length;
+      meta.textContent = `${n.toLocaleString()} ZIPs`;
+    }
+    // If the toggle is on (default state in Day 1B polish), render now that
+    // we have the data. The toggle is set in the HTML and ZIP_LAYER_VISIBLE
+    // is initialized to true to match.
+    if (ZIP_LAYER_VISIBLE) renderZipLayer();
+  } catch (err) {
+    // Non-fatal: disable the toggle and leave a hint.
+    const tog = document.getElementById('toggleZipLayer');
+    if (tog) {
+      tog.disabled = true;
+      tog.checked = false;
+    }
+    ZIP_LAYER_VISIBLE = false;
+    const meta = document.getElementById('zipLayerMeta');
+    if (meta) meta.textContent = 'unavailable';
+    console.warn('ZIP layer not loaded:', err);
+  }
+}
+
+// Pre-compute centroid of a Polygon/MultiPolygon GeoJSON geometry.
+// Used for assigning a ZIP to a zone (we ask: which zone is this ZIP's center in?).
+function geomCentroid(geom) {
+  let sx = 0, sy = 0, n = 0;
+  function walk(c) {
+    if (typeof c[0] === 'number') { sx += c[0]; sy += c[1]; n++; }
+    else { for (const p of c) walk(p); }
+  }
+  walk(geom.coordinates);
+  return n ? [sx / n, sy / n] : null;
+}
+
+// Ray-casting point-in-polygon. Polygon is [[lat,lng], ...] (the format used
+// by zones.json's assignment_rules.params.polygon).
+function pointInLatLngPolygon(lat, lng, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [yi, xi] = polygon[i];
+    const [yj, xj] = polygon[j];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Port of the Apps Script assignZone_ logic, JS-side, for ZIP-feature properties.
+// Returns a zone_id or null. Mirrors zones.json assignment_rules dispatch.
+// The Apps Script version operates on an address row; this version operates on
+// a ZIP's properties + centroid, which are what we have in the GeoJSON.
+function assignZoneForZip(zipProps, centroidLatLng) {
+  // Derive a "market" for this ZIP from its state, since the GeoJSON doesn't
+  // carry a market field. Mirrors the markets used in zones.json.
+  const stateToMarket = { CA: 'LOS ANGELES', IL: 'CHICAGO', IN: 'CHICAGO', WI: 'MILWAUKEE' };
+  const market = stateToMarket[zipProps.state] || null;
+  const stateFull = { CA: 'California', IL: 'Illinois', IN: 'Indiana', WI: 'Wisconsin' }[zipProps.state] || zipProps.state;
+
+  for (const rule of ASSIGNMENT_RULES) {
+    const m = rule.match || {};
+    if (m.market && m.market !== market) continue;
+    if (m.state && m.state !== stateFull) continue;
+
+    if (rule.type === 'zip_list') {
+      // params.zips is { zone_id: ["12345", ...], ... }
+      // First zone whose list contains this ZIP wins. Whitespace-trimmed for safety.
+      const zipMap = (rule.params && rule.params.zips) || {};
+      const z = (zipProps.zip || '').trim();
+      if (!z) continue;
+      for (const [zoneId, zips] of Object.entries(zipMap)) {
+        if (zips.includes(z)) return zoneId;
+      }
+      continue;
+    } else if (rule.type === 'polygon') {
+      const poly = rule.params && rule.params.polygon;
+      if (!poly) continue;
+      if (pointInLatLngPolygon(centroidLatLng[0], centroidLatLng[1], poly)) {
+        return rule.assign_zone_id;
+      }
+    } else if (rule.type === 'market_match') {
+      // Already filtered by m.market above; if we got here and there's no further
+      // qualifier, the rule wins.
+      return rule.assign_zone_id;
+    } else if (rule.type === 'county_list') {
+      const counties = (rule.params && rule.params.counties) || [];
+      // zip_tier_list says e.g. "Lake County" — same convention as zones.json.
+      if (counties.some(c => (zipProps.county || '').toLowerCase() === c.toLowerCase())) {
+        return rule.assign_zone_id;
+      }
+    }
+    // Other rule types (quadrant_split, lat_band) aren't currently used in
+    // zones.json v1.3 but the Apps Script supports them. If they appear later,
+    // this function should be extended.
+  }
+  return null;
+}
+
+function styleZipFeature(feat) {
+  // Always color by zone. The previous Tier and None modes were removed in
+  // Day 1B polish; every ZIP in the current DMAs is Tier 1, so Tier mode
+  // produced a uniform red wash with no information value.
+  const baseStyle = {
+    weight: 0.6,
+    color: '#6b7280',     // outline color (overridden below to match fill)
+    fillOpacity: 0.0,
+    fillColor: '#9ca3af',
+  };
+
+  // Cache the zone assignment on the feature so we don't recompute on every
+  // restyle (e.g., if we ever reintroduce a mode toggle).
+  if (!('_zoneCached' in feat.properties)) {
+    const c = geomCentroid(feat.geometry);
+    feat.properties._zoneCached = c ? assignZoneForZip(feat.properties, [c[1], c[0]]) : null;
+    // Note: GeoJSON coords are [lng,lat]; centroid returns [lng,lat]; the rule
+    // polygons in zones.json are [lat,lng]. We swap above.
+  }
+  const zoneId = feat.properties._zoneCached;
+  const zone = zoneId ? ZONES[zoneId] : null;
+  if (!zone) {
+    // Should be empty after the Day 1B manual_zip_overrides rule, but kept as
+    // a safety net for any future ZIP added to the GeoJSON without a zone.
+    return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
+  }
+  return { ...baseStyle, fillOpacity: 0.25, fillColor: zone.color, color: zone.color };
+}
+
+function renderZipLayer() {
+  // Remove the existing layer (if any), then add a fresh one if visible.
+  if (ZIP_LAYER_GROUP) {
+    map.removeLayer(ZIP_LAYER_GROUP);
+    ZIP_LAYER_GROUP = null;
+  }
+  if (!ZIP_LAYER_VISIBLE || !ZIP_LAYER_DATA) return;
+
+  ZIP_LAYER_GROUP = L.geoJSON(ZIP_LAYER_DATA, {
+    style: styleZipFeature,
+    onEachFeature: (feat, layer) => {
+      const p = feat.properties;
+      const zoneId = p._zoneCached;
+      const zone = zoneId ? ZONES[zoneId] : null;
+      const lines = [
+        `<strong>${p.zip}</strong> — ${p.city || '?'}, ${p.state || '?'}`,
+        `${p.county || ''}`,
+        `Tier: ${p.tier || '—'}`,
+        `Zone: ${zone ? zone.label : '(unassigned)'}`,
+      ];
+      layer.bindTooltip(lines.join('<br>'), { sticky: true });
+    },
+  });
+
+  // Add to map BELOW pins and zone overlays. We do this by adding it first
+  // (Leaflet z-orders by add-time) and then re-adding markerLayer/zoneLayer.
+  ZIP_LAYER_GROUP.addTo(map);
+  // Re-add pins + zone overlays so they paint above the ZIP layer.
+  if (map.hasLayer(zoneLayer)) { map.removeLayer(zoneLayer); zoneLayer.addTo(map); }
+  if (map.hasLayer(markerLayer)) { map.removeLayer(markerLayer); markerLayer.addTo(map); }
+}
+
+function setZipLayerVisible(visible) {
+  ZIP_LAYER_VISIBLE = !!visible;
+  renderZipLayer();
+}
+
+
 document.querySelectorAll('.market-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
@@ -927,6 +1152,11 @@ document.getElementById('filterSearch').addEventListener('input', e => {
 });
 
 document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
+
+// ZIP layer toggle (Day 1B)
+document.getElementById('toggleZipLayer').addEventListener('change', e => {
+  setZipLayerVisible(e.target.checked);
+});
 
 loadAll();
 </script>

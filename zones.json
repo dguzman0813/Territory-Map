@@ -1,7 +1,7 @@
 {
-  "version": "1.4",
+  "version": "1.5",
   "last_updated": "2026-05-07",
-  "notes": "v1.4 (Day 3): Switched zone assignment from polygon-based to ZIP-list-based. Every ZIP in our 3 DMAs is assigned to a zone via the zip_assignments rule. The polygon rules have been retired from assignment_rules. The market_match (Milwaukee) and county_list (Lake/McHenry IL) rules remain as fallbacks for any ZIP not enumerated in zip_assignments. polygon_overlays block is preserved but the preview HTML hides the dashed overlays in v1.4 \u2014 colored ZIPs are now the sole territory boundary indicator. TO REASSIGN A ZIP: find it in any zone's array under assignment_rules[0].params.zips, move it to the target zone's array. Order within an array doesn't matter; the script that generated this file sorts them.",
+  "notes": "v1.5 (2026-05-07): LA zone shake-up. Zone IDs renamed to drop people's names (LA-Albert\u2192LA-NORTH, LA-Alex\u2192LA-WEST, LA-Julie\u2192LA-EAST, LA-Zoila\u2192LA-INLAND). Account managers swapped between LA-NORTH and LA-WEST: Alex Acuna now owns the North & High Desert territory (LA-NORTH), and Albert Trevino now owns West Basin & Coast (LA-WEST). 40 LA ZIPs moved into LA-NORTH from LA-WEST (23) and LA-EAST (17), comprising a Westside-Hollywood-Glendale strip from Bel Air east through Burbank. Existing addresses in the Sheet were re-assigned by the Apps Script's migrateZoneIds_() one-time function. TO REASSIGN A ZIP: find it in any zone's array under assignment_rules[0].params.zips, move it to the target zone's array. Order within an array does not matter; the build script sorts them.",
   "zones": {
     "Chicago-CENTRAL": {
       "label": "Chicago Central",
@@ -24,29 +24,29 @@
       "description": "All of Milwaukee market + Lake County IL + McHenry County IL",
       "account_manager": "Ana Lopes"
     },
-    "LA-Albert": {
-      "label": "LA \u2014 Albert (North & High Desert)",
+    "LA-NORTH": {
+      "label": "LA \u2014 North & High Desert",
       "market": "LOS ANGELES",
       "color": "#dc2626",
       "description": "San Fernando Valley (excluding Burbank), high desert (Lancaster, Palmdale, Victorville), all of Ventura County (Thousand Oaks, Oxnard, Ventura, Ojai, Santa Paula, Simi Valley)",
-      "account_manager": "Albert Trevino"
+      "account_manager": "Alex Acuna"
     },
-    "LA-Alex": {
-      "label": "LA \u2014 Alex (West Basin & Coast)",
+    "LA-WEST": {
+      "label": "LA \u2014 West Basin & Coast",
       "market": "LOS ANGELES",
       "color": "#2563eb",
       "description": "West LA basin and coast: LA west of the 5/710, Inglewood, Compton, Lynwood, South Bay, PV peninsula, Wilmington, Malibu (full coast)",
-      "account_manager": "Alex Acuna"
+      "account_manager": "Albert Trevino"
     },
-    "LA-Julie": {
-      "label": "LA \u2014 Julie (East Basin & North OC)",
+    "LA-EAST": {
+      "label": "LA \u2014 East Basin & North OC",
       "market": "LOS ANGELES",
       "color": "#9333ea",
       "description": "East LA basin: east downtown, Glendale, Pasadena, Burbank, San Gabriel Valley, Long Beach, north OC (Anaheim, Santa Ana, Fullerton west of 57/55)",
       "account_manager": "Julie Lin"
     },
-    "LA-Zoila": {
-      "label": "LA \u2014 Zoila (Inland Empire & South OC)",
+    "LA-INLAND": {
+      "label": "LA \u2014 Inland Empire & South OC",
       "market": "LOS ANGELES",
       "color": "#ea580c",
       "description": "Inland Empire (Pomona, Ontario, San Bernardino, Riverside, Fontana), south OC (Irvine, Mission Viejo, San Juan Capistrano), eastern high desert",
@@ -80,13 +80,49 @@
     {
       "rule_id": "zip_assignments",
       "type": "zip_list",
-      "description": "Day 3 snap-to-ZIPs (2026-05-07): every ZIP in the LA + Chicago + Milwaukee DMAs assigned to an account manager. Initial mapping produced mechanically by snapping each ZIP centroid through the previous polygon rules + the 39-ZIP manual override block. The sales manager reviews this list and proposes ZIP-level reassignments (e.g., 'move 91302 from Alex to Albert'); each such change is a single-line edit to the array below. Must evaluate before market_match / county_list fallbacks.",
+      "description": "Day 3 + v1.5 (2026-05-07): Every ZIP in the LA + Chicago + Milwaukee DMAs assigned to a zone. v1.5 changes since v1.4: zone IDs renamed (LA-Albert\u2192LA-NORTH, LA-Alex\u2192LA-WEST, LA-Julie\u2192LA-EAST, LA-Zoila\u2192LA-INLAND), account managers swapped between LA-NORTH and LA-WEST, and 40 LA ZIPs moved into LA-NORTH (Westside / Hollywood / Glendale strip from Bel Air east through Glendale and Burbank). The sales manager reviews this list and proposes ZIP-level reassignments; each is a single-line edit to the array below. Must evaluate before market_match / county_list fallbacks.",
       "params": {
         "zips": {
-          "LA-Albert": [
+          "LA-NORTH": [
+            "90004",
+            "90005",
+            "90010",
+            "90012",
+            "90017",
+            "90020",
+            "90024",
+            "90026",
+            "90027",
+            "90028",
+            "90029",
+            "90035",
+            "90036",
+            "90038",
+            "90039",
+            "90046",
+            "90048",
+            "90057",
+            "90065",
+            "90067",
+            "90068",
+            "90069",
+            "90077",
+            "90095",
+            "90210",
+            "90211",
+            "90212",
             "90265",
             "91040",
             "91042",
+            "91201",
+            "91202",
+            "91203",
+            "91204",
+            "91205",
+            "91206",
+            "91207",
+            "91208",
+            "91210",
             "91214",
             "91301",
             "91303",
@@ -133,12 +169,16 @@
             "91411",
             "91423",
             "91436",
+            "91502",
+            "91505",
+            "91506",
             "91601",
             "91602",
             "91604",
             "91605",
             "91606",
             "91607",
+            "91608",
             "92285",
             "92301",
             "92304",
@@ -210,67 +250,41 @@
             "93563",
             "93591"
           ],
-          "LA-Alex": [
+          "LA-WEST": [
             "90001",
             "90002",
             "90003",
-            "90004",
-            "90005",
             "90006",
             "90007",
             "90008",
-            "90010",
             "90011",
-            "90012",
             "90013",
             "90014",
             "90015",
             "90016",
-            "90017",
             "90018",
             "90019",
-            "90020",
             "90021",
-            "90024",
             "90025",
-            "90026",
-            "90027",
-            "90028",
-            "90029",
             "90034",
-            "90035",
-            "90036",
             "90037",
-            "90038",
-            "90039",
             "90043",
             "90044",
             "90045",
-            "90046",
             "90047",
-            "90048",
             "90049",
             "90052",
             "90056",
-            "90057",
             "90059",
             "90061",
             "90062",
             "90064",
             "90066",
-            "90067",
-            "90068",
-            "90069",
             "90071",
             "90073",
-            "90077",
             "90079",
             "90089",
             "90094",
-            "90095",
-            "90210",
-            "90211",
-            "90212",
             "90220",
             "90221",
             "90222",
@@ -327,7 +341,7 @@
             "90810",
             "91302"
           ],
-          "LA-Julie": [
+          "LA-EAST": [
             "90022",
             "90023",
             "90031",
@@ -338,7 +352,6 @@
             "90042",
             "90058",
             "90063",
-            "90065",
             "90201",
             "90240",
             "90241",
@@ -405,21 +418,8 @@
             "91107",
             "91108",
             "91125",
-            "91201",
-            "91202",
-            "91203",
-            "91204",
-            "91205",
-            "91206",
-            "91207",
-            "91208",
-            "91210",
             "91501",
-            "91502",
             "91504",
-            "91505",
-            "91506",
-            "91608",
             "91706",
             "91722",
             "91723",
@@ -474,7 +474,7 @@
             "92845",
             "92868"
           ],
-          "LA-Zoila": [
+          "LA-INLAND": [
             "91701",
             "91702",
             "91708",
@@ -1236,7 +1236,7 @@
   ],
   "polygon_overlays": {
     "_comment": "Approximate visual polygons for the map's zone overlays. These DO NOT drive assignment \u2014 they're cosmetic. Assignment is governed entirely by assignment_rules above. Polygons are arrays of [lat, lng] vertices.",
-    "LA-Albert": [
+    "LA-NORTH": [
       [
         35.2,
         -120.0
@@ -1302,7 +1302,7 @@
         -120.0
       ]
     ],
-    "LA-Alex": [
+    "LA-WEST": [
       [
         34.13,
         -118.225
@@ -1384,7 +1384,7 @@
         -118.225
       ]
     ],
-    "LA-Julie": [
+    "LA-EAST": [
       [
         34.22,
         -118.37
@@ -1446,7 +1446,7 @@
         -118.37
       ]
     ],
-    "LA-Zoila": [
+    "LA-INLAND": [
       [
         34.27,
         -117.86
@@ -1585,6 +1585,7 @@
     "2026-05-01 (v1.2): Extended Albert's territory west through full Ventura County (Thousand Oaks, Oxnard, Ventura, Ojai). Carved Burbank out of Albert and gave it to Julie. Changed Julie's color from green (#16a34a) to vivid purple (#9333ea) for better visibility. Visual overlays now match assignment polygons exactly (flush, not inset).",
     "2026-05-01 (v1.2): Fixed pre-existing gap on Malibu coast. Alex's western edge now extends to lng -118.75, sharing a boundary with Albert's new Ventura coast step. Malibu now properly assigned to Alex.",
     "2026-05-01 (v1.3): Chicago Central/South split is no longer a flat horizontal line. South now claims a downtown lakefront corridor (lng -87.75 to lake, up to lat 41.90) and the Berwyn area (lng -87.85 to -87.75, up to lat 41.86). Oak Park stays in Central. Implementation: converted chicago_central and chicago_south rules from lat_band to polygon. The northern_il_to_milwaukee rule still runs first to peel off Lake/McHenry IL.",
-    "2026-05-07 (v1.4): zip_assignments rule replaces polygon-based assignment. To move ZIP X from zone A to zone B, edit assignment_rules[0].params.zips: remove X from A's array, add to B's array. Apps Script update is pending \u2014 until then, the nightly geocoder still uses the polygon rules from v1.3 (which remain in the bound script even though they're absent from this file). The map's coloring uses zip_assignments only."
+    "2026-05-07 (v1.4): zip_assignments rule replaces polygon-based assignment. To move ZIP X from zone A to zone B, edit assignment_rules[0].params.zips: remove X from A's array, add to B's array. Apps Script update is pending \u2014 until then, the nightly geocoder still uses the polygon rules from v1.3 (which remain in the bound script even though they're absent from this file). The map's coloring uses zip_assignments only.",
+    "2026-05-07 (v1.5): LA shake-up. Renamed zone IDs to be neutral (LA-NORTH/WEST/EAST/INLAND). Swapped Alex\u2194Albert as managers of North\u2194West. Moved 40 ZIPs (Bel Air \u2192 Glendale strip) into LA-NORTH. The Apps Script's migrateZoneIds_() function rewrote all existing zone_id and account_manager values in the Sheet by re-running the assignment dispatch \u2014 so any address whose ZIP is in the snap rule got the correct new zone + manager automatically."
   ]
 }
