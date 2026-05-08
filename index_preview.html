@@ -153,6 +153,50 @@
     margin-left: auto; font-size: 11px; color: #9ca3af; font-weight: 400;
   }
 
+  /* ---- Demographics block (sidebar) — Day 2 addition ---- */
+  .demographics-block { margin-bottom: 24px; }
+  .demographics-block h3 {
+    font-size: 12px; text-transform: uppercase; color: #6b7280;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 8px;
+  }
+  .demographics-block h3 .demo-scope {
+    font-size: 10px; font-weight: 400; color: #9ca3af;
+    text-transform: none; letter-spacing: 0;
+    text-align: right; flex-shrink: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .demo-grid {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px;
+  }
+  .demo-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 3px 0;
+  }
+  .demo-row .demo-label { color: #6b7280; }
+  .demo-row .demo-value { color: #111827; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .demo-row.demo-section-header {
+    color: #6b7280; font-weight: 600; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;
+  }
+  .demo-row.demo-section-header:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  /* Tiny race-bar visualization */
+  .demo-race-bar {
+    display: flex; height: 6px; margin: 4px 0 6px;
+    border-radius: 3px; overflow: hidden;
+    background: #e5e7eb;
+  }
+  .demo-race-bar-seg { height: 100%; }
+  .demo-empty {
+    color: #9ca3af; font-style: italic; text-align: center; padding: 4px 0;
+  }
+  .demo-footnote {
+    color: #9ca3af; font-size: 10px; margin-top: 6px; line-height: 1.4;
+  }
+
   /* ---- Filters (sidebar) ---- */
   .filters { margin-bottom: 24px; }
   .filters h3 {
@@ -387,6 +431,17 @@
       </label>
     </div>
 
+    <div class="demographics-block" id="demographicsBlock">
+      <h3>
+        <span id="demoTitle">Demographics</span>
+        <span class="demo-scope" id="demoScope">— all in scope</span>
+      </h3>
+      <div class="demo-grid" id="demoGrid">
+        <div class="demo-empty">Loading…</div>
+      </div>
+      <div class="demo-footnote" id="demoFootnote"></div>
+    </div>
+
     <div class="zone-summary">
       <h3>Manager Zone Distribution</h3>
       <div id="zoneList"></div>
@@ -426,6 +481,7 @@
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTXEdd6ZzZLkfhz-n3HptOnJ_mwVevQeFclKicFpbM4UI4qKP3pa2v_yex3iwdIrpFr1nLmXeOYMeu2/pub?gid=0&single=true&output=csv";
 const ZONES_JSON_URL = "zones.json";  // sibling file in the same Drive folder
 const ZIP_LAYER_URL  = "zip_layer.geojson";  // Day 1B addition; sibling file
+const ZIP_DEMOGRAPHICS_URL = "zip_demographics.json";  // Day 2 addition; sibling file
 
 // ============================================================================
 // STATE — populated by loadAll() at startup. Don't reference before then.
@@ -441,6 +497,10 @@ let CURRENT_VIEW = 'ALL';  // last-clicked market button — re-rendering keeps 
 let ZIP_LAYER_DATA = null; // raw GeoJSON FeatureCollection, loaded once
 let ZIP_LAYER_GROUP = null; // L.geoJSON layer; null until first render
 let ZIP_LAYER_VISIBLE = true; // on by default; user can hide via the checkbox
+
+// Demographics state — Day 2
+let ZIP_DEMOGRAPHICS = null; // { "90210": { population, median_household_income, pct_*, population_density }, ... }
+let DEMO_HOVER_ZIP = null;   // ZIP code currently hovered (null = show scope aggregate)
 
 // User-controlled filters (compose with the market view).
 // managers/carriers: empty Set = "no filter, show everything in scope".
@@ -507,6 +567,10 @@ async function loadAll() {
   // Day 1B: kick off the ZIP layer fetch in parallel — non-blocking.
   // If it fails, we just don't show the layer; the map still works.
   fetchZipLayer();
+
+  // Day 2: kick off the demographics fetch in parallel — non-blocking.
+  // If it fails, the map still works without demographics.
+  fetchDemographics();
 
   // Reset to the proper "ALL" view now that we know it
   const allView = MARKET_VIEWS['ALL'];
@@ -654,6 +718,8 @@ function applyFiltersAndRender() {
   updateStats(toShow);
   updateMarketCounts();
   updateClearLink();
+  // Day 2: demographics panel reflects market + manager scope
+  renderDemographicsPanel();
 }
 
 function rowMatchesFilters(a) {
@@ -995,6 +1061,238 @@ async function fetchZipLayer() {
   }
 }
 
+// ============================================================================
+// DEMOGRAPHICS (Day 2)
+// ============================================================================
+async function fetchDemographics() {
+  try {
+    const resp = await fetch(ZIP_DEMOGRAPHICS_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    // Strip the _meta key so iteration over ZIP_DEMOGRAPHICS only yields ZIPs.
+    const meta = data._meta || {};
+    delete data._meta;
+    ZIP_DEMOGRAPHICS = data;
+    console.log(`Demographics: loaded ${Object.keys(ZIP_DEMOGRAPHICS).length} ZIPs (vintage: ${meta.vintage || 'unknown'}).`);
+    // Render now (zones may already have been computed from ZIP layer)
+    renderDemographicsPanel();
+  } catch (err) {
+    // Non-fatal: leave the panel showing "Loading…" → "unavailable"
+    const grid = document.getElementById('demoGrid');
+    if (grid) grid.innerHTML = '<div class="demo-empty">Demographics unavailable</div>';
+    console.warn('Demographics not loaded:', err);
+  }
+}
+
+// Format helpers
+function fmtNum(n)    { return n == null ? '—' : Math.round(n).toLocaleString(); }
+function fmtMoney(n)  { return n == null ? '—' : '$' + Math.round(n).toLocaleString(); }
+function fmtPct(n)    { return n == null ? '—' : n.toFixed(1) + '%'; }
+function fmtDensity(n){ return n == null ? '—' : Math.round(n).toLocaleString() + '/mi²'; }
+
+// Compute demographics aggregate over a list of ZIPs.
+// Returns { population, median_household_income (pop-weighted mean), pct_* (recomputed),
+//           population_density (pop-weighted mean), zip_count, has_data_count }.
+// pct_* and density are pop-weighted; population is summed.
+function aggregateDemographics(zips) {
+  let totalPop = 0;
+  let weightedIncomeNum = 0, weightedIncomeDen = 0;  // pop-weighted mean of medians
+  let weightedDensityNum = 0, weightedDensityDen = 0;
+  // For percentages, recompute from underlying populations:
+  // pct_X_aggregate = sum(pop_i * pct_X_i) / sum(pop_i where pct_X_i is not null)
+  const pctAccum = { pct_hispanic: 0, pct_white_nh: 0, pct_black_nh: 0, pct_asian_nh: 0, pct_other_nh: 0 };
+  const pctDen = { pct_hispanic: 0, pct_white_nh: 0, pct_black_nh: 0, pct_asian_nh: 0, pct_other_nh: 0 };
+  let hasDataCount = 0;
+
+  for (const zip of zips) {
+    const r = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[zip];
+    if (!r) continue;
+    if (r.population == null) continue;
+    hasDataCount++;
+    totalPop += r.population;
+    if (r.median_household_income != null) {
+      weightedIncomeNum += r.population * r.median_household_income;
+      weightedIncomeDen += r.population;
+    }
+    if (r.population_density != null) {
+      weightedDensityNum += r.population * r.population_density;
+      weightedDensityDen += r.population;
+    }
+    for (const k of Object.keys(pctAccum)) {
+      if (r[k] != null) {
+        pctAccum[k] += r.population * r[k];
+        pctDen[k] += r.population;
+      }
+    }
+  }
+
+  return {
+    zip_count: zips.length,
+    has_data_count: hasDataCount,
+    population: totalPop,
+    median_household_income: weightedIncomeDen > 0 ? weightedIncomeNum / weightedIncomeDen : null,
+    population_density: weightedDensityDen > 0 ? weightedDensityNum / weightedDensityDen : null,
+    pct_hispanic: pctDen.pct_hispanic > 0 ? pctAccum.pct_hispanic / pctDen.pct_hispanic : null,
+    pct_white_nh: pctDen.pct_white_nh > 0 ? pctAccum.pct_white_nh / pctDen.pct_white_nh : null,
+    pct_black_nh: pctDen.pct_black_nh > 0 ? pctAccum.pct_black_nh / pctDen.pct_black_nh : null,
+    pct_asian_nh: pctDen.pct_asian_nh > 0 ? pctAccum.pct_asian_nh / pctDen.pct_asian_nh : null,
+    pct_other_nh: pctDen.pct_other_nh > 0 ? pctAccum.pct_other_nh / pctDen.pct_other_nh : null,
+  };
+}
+
+// Decide which ZIPs are "in scope" given the current market view + manager filter.
+// We use the ZIP layer's _zoneCached property (set during ZIP rendering) plus
+// the current FILTERS.managers / CURRENT_VIEW. Carrier and search filters are
+// pin-level concerns and don't restrict which ZIPs are in territory scope.
+function getInScopeZips() {
+  if (!ZIP_LAYER_DATA) return [];
+  const features = ZIP_LAYER_DATA.features || [];
+
+  // Map each zone -> account_manager
+  const zoneToManager = {};
+  for (const [zid, zd] of Object.entries(ZONES)) {
+    zoneToManager[zid] = zd.account_manager;
+  }
+
+  // Determine which markets are in scope
+  let marketScope = null;
+  if (CURRENT_VIEW === 'LOS ANGELES') marketScope = ['LOS ANGELES'];
+  else if (CURRENT_VIEW === 'CHICAGO_MIL') marketScope = ['CHICAGO', 'MILWAUKEE'];
+  // else null = no market filter (ALL view)
+
+  const result = [];
+  for (const feat of features) {
+    const p = feat.properties;
+    const zoneId = p._zoneCached;
+    const zone = zoneId ? ZONES[zoneId] : null;
+    if (zone && marketScope && !marketScope.includes(zone.market)) continue;
+    if (FILTERS.managers.size > 0) {
+      if (!zone || !FILTERS.managers.has(zone.account_manager)) continue;
+    }
+    result.push(p.zip);
+  }
+  return result;
+}
+
+// Build a short, human-readable scope description for the Demographics panel header
+function describeScope() {
+  const parts = [];
+  if (CURRENT_VIEW === 'LOS ANGELES') parts.push('Los Angeles');
+  else if (CURRENT_VIEW === 'CHICAGO_MIL') parts.push('Chicago + Milwaukee');
+  else parts.push('all markets');
+
+  if (FILTERS.managers.size > 0) {
+    if (FILTERS.managers.size === 1) {
+      parts.push([...FILTERS.managers][0]);
+    } else {
+      parts.push(`${FILTERS.managers.size} managers`);
+    }
+  }
+  return parts.join(' · ');
+}
+
+function renderDemographicsPanel() {
+  const grid = document.getElementById('demoGrid');
+  const scopeEl = document.getElementById('demoScope');
+  const titleEl = document.getElementById('demoTitle');
+  const noteEl = document.getElementById('demoFootnote');
+  if (!grid) return;
+
+  if (!ZIP_DEMOGRAPHICS) {
+    grid.innerHTML = '<div class="demo-empty">Loading…</div>';
+    return;
+  }
+
+  // Hover-mode: show one ZIP's stats
+  if (DEMO_HOVER_ZIP) {
+    const r = ZIP_DEMOGRAPHICS[DEMO_HOVER_ZIP];
+    titleEl.textContent = 'ZIP ' + DEMO_HOVER_ZIP;
+    scopeEl.textContent = '— hover';
+    if (!r || r.population == null) {
+      grid.innerHTML = '<div class="demo-empty">No Census data for this ZIP</div>';
+      noteEl.textContent = '';
+      return;
+    }
+    grid.innerHTML = renderDemoRows(r, false);
+    noteEl.textContent = '';
+    return;
+  }
+
+  // Aggregate-mode: roll up all in-scope ZIPs
+  titleEl.textContent = 'Demographics';
+  const inScope = getInScopeZips();
+  scopeEl.textContent = '— ' + describeScope();
+
+  if (inScope.length === 0) {
+    grid.innerHTML = '<div class="demo-empty">No ZIPs in scope</div>';
+    noteEl.textContent = '';
+    return;
+  }
+
+  const agg = aggregateDemographics(inScope);
+  if (agg.has_data_count === 0) {
+    grid.innerHTML = '<div class="demo-empty">No demographic data for ZIPs in scope</div>';
+    noteEl.textContent = '';
+    return;
+  }
+  grid.innerHTML = renderDemoRows(agg, true);
+  // Footnote — explain what's shown
+  const noteParts = [];
+  noteParts.push(`Aggregated over ${agg.has_data_count.toLocaleString()} ZIPs.`);
+  if (agg.has_data_count < inScope.length) {
+    noteParts.push(`${(inScope.length - agg.has_data_count).toLocaleString()} ZIPs have no Census data.`);
+  }
+  noteParts.push('Income & density are population-weighted averages.');
+  noteEl.textContent = noteParts.join(' ');
+}
+
+// Render the rows of demographic data. `r` is either a per-ZIP record or an
+// aggregate. `isAggregate` controls whether population is shown as "Total" vs
+// "Pop." and includes ZIP count.
+function renderDemoRows(r, isAggregate) {
+  const popLabel = isAggregate ? 'Total population' : 'Population';
+  // Race bar — segments proportional to each pct
+  const segments = [];
+  const colors = {
+    hispanic: '#f59e0b',
+    white_nh: '#60a5fa',
+    black_nh: '#a78bfa',
+    asian_nh: '#34d399',
+    other_nh: '#9ca3af',
+  };
+  const races = [
+    ['hispanic', 'Hispanic',     r.pct_hispanic],
+    ['white_nh', 'White (NH)',   r.pct_white_nh],
+    ['black_nh', 'Black (NH)',   r.pct_black_nh],
+    ['asian_nh', 'Asian (NH)',   r.pct_asian_nh],
+    ['other_nh', 'Other (NH)',   r.pct_other_nh],
+  ];
+  for (const [key, , pct] of races) {
+    if (pct != null && pct > 0) {
+      segments.push(`<span class="demo-race-bar-seg" style="width:${pct}%;background:${colors[key]}" title="${pct.toFixed(1)}%"></span>`);
+    }
+  }
+  const raceBar = segments.length ? `<div class="demo-race-bar">${segments.join('')}</div>` : '';
+
+  const rows = [
+    `<div class="demo-row demo-section-header">Population</div>`,
+    `<div class="demo-row"><span class="demo-label">${popLabel}</span><span class="demo-value">${fmtNum(r.population)}</span></div>`,
+    `<div class="demo-row"><span class="demo-label">Density</span><span class="demo-value">${fmtDensity(r.population_density)}</span></div>`,
+    `<div class="demo-row demo-section-header">Income</div>`,
+    `<div class="demo-row"><span class="demo-label">Median household</span><span class="demo-value">${fmtMoney(r.median_household_income)}</span></div>`,
+    `<div class="demo-row demo-section-header">Race / Ethnicity</div>`,
+    raceBar,
+  ];
+  for (const [, label, pct] of races) {
+    rows.push(`<div class="demo-row"><span class="demo-label">${label}</span><span class="demo-value">${fmtPct(pct)}</span></div>`);
+  }
+  return rows.join('');
+}
+
+// ============================================================================
+// END DEMOGRAPHICS
+// ============================================================================
+
 // Pre-compute centroid of a Polygon/MultiPolygon GeoJSON geometry.
 // Used for assigning a ZIP to a zone (we ask: which zone is this ZIP's center in?).
 function geomCentroid(geom) {
@@ -1117,10 +1415,32 @@ function renderZipLayer() {
       const lines = [
         `<strong>${p.zip}</strong> — ${p.city || '?'}, ${p.state || '?'}`,
         `${p.county || ''}`,
-        `Tier: ${p.tier || '—'}`,
         `Zone: ${zone ? zone.label : '(unassigned)'}`,
       ];
+      // Day 2: append demographic details if we have them
+      const demo = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[p.zip];
+      if (demo && demo.population != null) {
+        lines.push('—');  // separator
+        lines.push(`Pop: <strong>${fmtNum(demo.population)}</strong> · Density: <strong>${fmtDensity(demo.population_density)}</strong>`);
+        lines.push(`Median income: <strong>${fmtMoney(demo.median_household_income)}</strong>`);
+        const races = [];
+        if (demo.pct_hispanic != null && demo.pct_hispanic > 0) races.push(`H ${demo.pct_hispanic.toFixed(0)}%`);
+        if (demo.pct_white_nh != null && demo.pct_white_nh > 0) races.push(`W ${demo.pct_white_nh.toFixed(0)}%`);
+        if (demo.pct_black_nh != null && demo.pct_black_nh > 0) races.push(`B ${demo.pct_black_nh.toFixed(0)}%`);
+        if (demo.pct_asian_nh != null && demo.pct_asian_nh > 0) races.push(`A ${demo.pct_asian_nh.toFixed(0)}%`);
+        if (races.length) lines.push(races.join(' · '));
+      }
       layer.bindTooltip(lines.join('<br>'), { sticky: true });
+
+      // Day 2: hovering switches the sidebar Demographics panel to per-ZIP mode
+      layer.on('mouseover', () => {
+        DEMO_HOVER_ZIP = p.zip;
+        renderDemographicsPanel();
+      });
+      layer.on('mouseout', () => {
+        DEMO_HOVER_ZIP = null;
+        renderDemographicsPanel();
+      });
     },
   });
 
