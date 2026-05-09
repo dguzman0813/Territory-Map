@@ -1,7 +1,7 @@
 {
-  "version": "1.6",
-  "last_updated": "2026-05-07",
-  "notes": "v1.6 (2026-05-07): Moved 25 San Bernardino County ZIPs from LA-NORTH to LA-INLAND. The high desert (Adelanto, Victorville, Hesperia, Apple Valley, Barstow) and the eastern Mojave (Trona, Fort Irwin, Newberry Springs, Lucerne Valley, Amboy, Ludlow, Landers) plus three borderline ZIPs (Phelan, Pi\u00f1on Hills, Wrightwood) and Red Mountain now belong to LA-INLAND (Zoila Ladd). Inyo County ZIPs (Bishop, Death Valley, Lone Pine, etc., 10 total) remain in LA-NORTH per Daniel's instruction. Result: LA-NORTH drops from 165 to 140 ZIPs, LA-INLAND grows from 127 to 152 ZIPs. After committing, run the Apps Script's migrateZoneIds() function to re-assign existing rows.",
+  "version": "1.7",
+  "last_updated": "2026-05-08",
+  "notes": "v1.7 (2026-05-08): Moved 4 LaSalle County, IL ZIPs (Cedar Point, Dana, Peru, Rutland) from Chicago-CENTRAL (Elizabeth Varela) to Chicago-SOUTH (Jorge Rodriguez). These are the rural west-of-Chicago ZIPs first assigned in the Day 1A cleanup; visual review of the live map showed them sandwiched inside Jorge's territory rather than Elizabeth's, so they're now grouped with him. After committing, run migrateZoneIds() in the Apps Script to re-assign any existing Sheet rows.",
   "zones": {
     "Chicago-CENTRAL": {
       "label": "Chicago Central",
@@ -731,11 +731,7 @@
             "60706",
             "60707",
             "60712",
-            "60714",
-            "61316",
-            "61321",
-            "61354",
-            "61358"
+            "60714"
           ],
           "Chicago-SOUTH": [
             "46301",
@@ -977,6 +973,8 @@
             "60964",
             "60969",
             "61301",
+            "61316",
+            "61321",
             "61325",
             "61332",
             "61334",
@@ -984,6 +982,8 @@
             "61342",
             "61348",
             "61350",
+            "61354",
+            "61358",
             "61360",
             "61364",
             "61370",
@@ -1587,6 +1587,7 @@
     "2026-05-01 (v1.3): Chicago Central/South split is no longer a flat horizontal line. South now claims a downtown lakefront corridor (lng -87.75 to lake, up to lat 41.90) and the Berwyn area (lng -87.85 to -87.75, up to lat 41.86). Oak Park stays in Central. Implementation: converted chicago_central and chicago_south rules from lat_band to polygon. The northern_il_to_milwaukee rule still runs first to peel off Lake/McHenry IL.",
     "2026-05-07 (v1.4): zip_assignments rule replaces polygon-based assignment. To move ZIP X from zone A to zone B, edit assignment_rules[0].params.zips: remove X from A's array, add to B's array. Apps Script update is pending \u2014 until then, the nightly geocoder still uses the polygon rules from v1.3 (which remain in the bound script even though they're absent from this file). The map's coloring uses zip_assignments only.",
     "2026-05-07 (v1.5): LA shake-up. Renamed zone IDs to be neutral (LA-NORTH/WEST/EAST/INLAND). Swapped Alex\u2194Albert as managers of North\u2194West. Moved 40 ZIPs (Bel Air \u2192 Glendale strip) into LA-NORTH. The Apps Script's migrateZoneIds_() function rewrote all existing zone_id and account_manager values in the Sheet by re-running the assignment dispatch \u2014 so any address whose ZIP is in the snap rule got the correct new zone + manager automatically.",
-    "2026-05-07 (v1.6): Moved 25 SBD ZIPs (high desert + eastern Mojave) from LA-NORTH to LA-INLAND. Alex Acuna's territory shrinks to metro LA / Antelope Valley / Inyo County desert. Zoila Ladd's territory expands to cover the full San Bernardino County extent outside Inyo (Riverside County + all of SBD)."
+    "2026-05-07 (v1.6): Moved 25 SBD ZIPs (high desert + eastern Mojave) from LA-NORTH to LA-INLAND. Alex Acuna's territory shrinks to metro LA / Antelope Valley / Inyo County desert. Zoila Ladd's territory expands to cover the full San Bernardino County extent outside Inyo (Riverside County + all of SBD).",
+    "2026-05-08 (v1.7): 4 LaSalle County IL ZIPs (61316/61321/61354/61358) moved from Chicago-CENTRAL to Chicago-SOUTH after visual confirmation they sit inside Jorge's surrounding territory."
   ]
 }
