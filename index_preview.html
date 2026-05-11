@@ -197,6 +197,42 @@
     color: #9ca3af; font-size: 10px; margin-top: 6px; line-height: 1.4;
   }
 
+  /* ---- Filter ZIPs by data (sidebar) — Day 2+ addition ---- */
+  .datafilter-block { margin-bottom: 24px; }
+  .datafilter-block h3 {
+    font-size: 12px; text-transform: uppercase; color: #6b7280;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .datafilter-block .clear-link {
+    font-size: 11px; text-transform: none; letter-spacing: 0;
+    color: #2563eb; cursor: pointer; text-decoration: none; font-weight: 500;
+  }
+  .datafilter-block .clear-link:hover { text-decoration: underline; }
+  .datafilter-block .clear-link.disabled {
+    color: #d1d5db; cursor: default; pointer-events: none;
+  }
+  .datafilter-row {
+    display: flex; flex-direction: column; gap: 6px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .datafilter-select, .datafilter-input {
+    width: 100%; padding: 6px 10px; font-size: 12px; font-family: inherit;
+    border: 1px solid #e5e7eb; border-radius: 6px; background: white;
+    color: #374151; outline: none; transition: border-color .15s;
+  }
+  .datafilter-select:focus, .datafilter-input:focus { border-color: #2563eb; }
+  .datafilter-select:disabled, .datafilter-input:disabled {
+    background: #f3f4f6; color: #9ca3af; cursor: not-allowed;
+  }
+  .datafilter-values { display: flex; gap: 6px; }
+  .datafilter-values .datafilter-input { flex: 1; }
+  .datafilter-status {
+    font-size: 11px; color: #6b7280; margin-top: 8px; line-height: 1.4;
+  }
+  .datafilter-status.active { color: #ca8a04; font-weight: 500; }
+
   /* ---- Filters (sidebar) ---- */
   .filters { margin-bottom: 24px; }
   .filters h3 {
@@ -431,6 +467,38 @@
       </label>
     </div>
 
+    <div class="datafilter-block">
+      <h3>
+        Filter ZIPs by data
+        <a class="clear-link disabled" id="clearDataFilter">Clear</a>
+      </h3>
+      <div class="datafilter-row">
+        <select id="dataFilterField" class="datafilter-select">
+          <option value="">— select field —</option>
+          <option value="median_household_income">Median income</option>
+          <option value="population">Population</option>
+          <option value="population_density">Density (per mi²)</option>
+          <option value="pct_hispanic">% Hispanic</option>
+          <option value="pct_white_nh">% White (non-Hisp)</option>
+          <option value="pct_black_nh">% Black (non-Hisp)</option>
+          <option value="pct_asian_nh">% Asian (non-Hisp)</option>
+          <option value="pct_other_nh">% Other (non-Hisp)</option>
+        </select>
+        <select id="dataFilterOp" class="datafilter-select datafilter-op" disabled>
+          <option value="gt">&gt; (greater than)</option>
+          <option value="lt">&lt; (less than)</option>
+          <option value="between">between</option>
+        </select>
+        <div class="datafilter-values">
+          <input type="number" id="dataFilterValue" class="datafilter-input"
+                 placeholder="value" disabled inputmode="decimal">
+          <input type="number" id="dataFilterValue2" class="datafilter-input datafilter-input-2"
+                 placeholder="and…" disabled inputmode="decimal" style="display:none">
+        </div>
+      </div>
+      <div class="datafilter-status" id="dataFilterStatus"></div>
+    </div>
+
     <div class="demographics-block" id="demographicsBlock">
       <h3>
         <span id="demoTitle">Demographics</span>
@@ -510,6 +578,95 @@ const FILTERS = {
   carriers: new Set(),
   search: '',
 };
+
+// Day 2+: Census data filter. When `field` is null the filter is inactive
+// and ZIPs render normally. When active, ZIPs matching the predicate get a
+// gold highlight; non-matching ZIPs fade to dim grey, and pins on
+// non-matching ZIPs are hidden.
+const DATA_FILTER = {
+  field: null,         // one of: median_household_income, population,
+                       // population_density, pct_hispanic, pct_white_nh,
+                       // pct_black_nh, pct_asian_nh, pct_other_nh
+  operator: 'gt',      // 'gt' | 'lt' | 'between'
+  value: null,         // primary numeric threshold
+  value2: null,        // upper bound when operator === 'between'
+};
+
+// Is the data filter actively narrowing the map?
+// Returns true only when we have a field, an operator, and value(s) that
+// produce a meaningful predicate. Half-typed states (field selected but no
+// value yet) count as inactive — better than confusing the user with a
+// momentarily-empty map while they're still typing.
+function isDataFilterActive() {
+  if (!DATA_FILTER.field) return false;
+  if (DATA_FILTER.value == null || isNaN(DATA_FILTER.value)) return false;
+  if (DATA_FILTER.operator === 'between') {
+    if (DATA_FILTER.value2 == null || isNaN(DATA_FILTER.value2)) return false;
+  }
+  return true;
+}
+
+// Does a given ZIP code match the active data filter?
+// Returns true if no filter is active. Returns false if filter is active but
+// the ZIP has no value for the selected field (null Census data).
+function zipMatchesDataFilter(zip) {
+  if (!isDataFilterActive()) return true;
+  if (!ZIP_DEMOGRAPHICS) return false; // filter on but no data — match nothing
+  const rec = ZIP_DEMOGRAPHICS[zip];
+  if (!rec) return false;
+  const v = rec[DATA_FILTER.field];
+  if (v == null) return false;
+  if (DATA_FILTER.operator === 'gt') return v > DATA_FILTER.value;
+  if (DATA_FILTER.operator === 'lt') return v < DATA_FILTER.value;
+  if (DATA_FILTER.operator === 'between') {
+    const lo = Math.min(DATA_FILTER.value, DATA_FILTER.value2);
+    const hi = Math.max(DATA_FILTER.value, DATA_FILTER.value2);
+    return v >= lo && v <= hi;
+  }
+  return false;
+}
+
+// Format the filter for the human-readable status / scope display.
+// Example outputs: "income > $100,000", "% Hispanic between 20% and 50%".
+function describeDataFilter() {
+  if (!isDataFilterActive()) return '';
+  const f = DATA_FILTER.field;
+  // Label for the field
+  const fieldLabels = {
+    median_household_income: 'income',
+    population:              'population',
+    population_density:      'density',
+    pct_hispanic:            '% Hispanic',
+    pct_white_nh:            '% White',
+    pct_black_nh:            '% Black',
+    pct_asian_nh:            '% Asian',
+    pct_other_nh:            '% Other',
+  };
+  const label = fieldLabels[f] || f;
+  // Format the value depending on field
+  const fmt = (n) => {
+    if (f === 'median_household_income') return '$' + Math.round(n).toLocaleString();
+    if (f === 'population')              return Math.round(n).toLocaleString();
+    if (f === 'population_density')      return Math.round(n).toLocaleString() + '/mi²';
+    return n + '%';
+  };
+  if (DATA_FILTER.operator === 'gt')      return `${label} > ${fmt(DATA_FILTER.value)}`;
+  if (DATA_FILTER.operator === 'lt')      return `${label} < ${fmt(DATA_FILTER.value)}`;
+  if (DATA_FILTER.operator === 'between') return `${label} between ${fmt(DATA_FILTER.value)} and ${fmt(DATA_FILTER.value2)}`;
+  return '';
+}
+
+// Build a Set of ZIPs that match the current data filter. Used to compose
+// with the pin filter — a pin's zip must be in this set, otherwise the pin
+// is hidden alongside the dim-grey ZIP polygon.
+function getDataFilterMatchingZips() {
+  if (!isDataFilterActive() || !ZIP_DEMOGRAPHICS) return null;  // null = no filter
+  const matches = new Set();
+  for (const zip of Object.keys(ZIP_DEMOGRAPHICS)) {
+    if (zipMatchesDataFilter(zip)) matches.add(zip);
+  }
+  return matches;
+}
 
 // ============================================================================
 // MAP — initialized immediately so the tile layer paints before data arrives.
@@ -732,6 +889,9 @@ function rowMatchesFilters(a) {
     ].join(' ').toLowerCase();
     if (!hay.includes(q)) return false;
   }
+  // Day 2+: hide pins on ZIPs that don't match the active data filter.
+  // If no filter is active, zipMatchesDataFilter always returns true.
+  if (isDataFilterActive() && !zipMatchesDataFilter(a.zip)) return false;
   return true;
 }
 
@@ -1169,6 +1329,8 @@ function getInScopeZips() {
     if (FILTERS.managers.size > 0) {
       if (!zone || !FILTERS.managers.has(zone.account_manager)) continue;
     }
+    // Day 2+: if a data filter is active, restrict scope to matching ZIPs
+    if (isDataFilterActive() && !zipMatchesDataFilter(p.zip)) continue;
     result.push(p.zip);
   }
   return result;
@@ -1187,6 +1349,9 @@ function describeScope() {
     } else {
       parts.push(`${FILTERS.managers.size} managers`);
     }
+  }
+  if (isDataFilterActive()) {
+    parts.push(describeDataFilter());
   }
   return parts.join(' · ');
 }
@@ -1381,7 +1546,7 @@ function styleZipFeature(feat) {
   };
 
   // Cache the zone assignment on the feature so we don't recompute on every
-  // restyle (e.g., if we ever reintroduce a mode toggle).
+  // restyle (e.g., when the data filter toggles).
   if (!('_zoneCached' in feat.properties)) {
     const c = geomCentroid(feat.geometry);
     feat.properties._zoneCached = c ? assignZoneForZip(feat.properties, [c[1], c[0]]) : null;
@@ -1390,11 +1555,33 @@ function styleZipFeature(feat) {
   }
   const zoneId = feat.properties._zoneCached;
   const zone = zoneId ? ZONES[zoneId] : null;
-  if (!zone) {
-    // Should be empty after the Day 1B manual_zip_overrides rule, but kept as
-    // a safety net for any future ZIP added to the GeoJSON without a zone.
-    return { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
+  const unassignedStyle = { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
+
+  // Data filter handling — gold ring for matches, dim grey for non-matches.
+  // The filter is checked only when active; otherwise normal zone coloring.
+  if (isDataFilterActive()) {
+    if (zipMatchesDataFilter(feat.properties.zip)) {
+      // Match: keep the zone's fill color but draw a thicker gold outline
+      // on top. Use a brighter/more saturated fill so the match really pops.
+      const fill = zone ? zone.color : '#d1d5db';
+      return {
+        weight: 2.5,
+        color: '#eab308',        // gold ring
+        fillColor: fill,
+        fillOpacity: 0.45,        // more saturated than the default 0.25
+      };
+    }
+    // Non-match: dim grey wash; barely visible — recedes into the background
+    return {
+      weight: 0.4,
+      color: '#9ca3af',
+      fillColor: '#9ca3af',
+      fillOpacity: 0.05,
+    };
   }
+
+  // Default (no data filter): normal zone-colored fill
+  if (!zone) return unassignedStyle;
   return { ...baseStyle, fillOpacity: 0.25, fillColor: zone.color, color: zone.color };
 }
 
@@ -1477,6 +1664,105 @@ document.getElementById('clearFilters').addEventListener('click', clearAllFilter
 document.getElementById('toggleZipLayer').addEventListener('change', e => {
   setZipLayerVisible(e.target.checked);
 });
+
+// ============================================================================
+// DATA FILTER WIRING — Day 2+
+// ============================================================================
+// The three inputs drive DATA_FILTER. Whenever any of them change, we
+// recompute and re-render the whole map view. Changes that produce a
+// half-valid filter (e.g., field selected but no value yet) just update the
+// internal state without triggering a re-style — the map stays in its
+// current state until the filter is fully valid.
+
+(function wireDataFilter() {
+  const fieldSel = document.getElementById('dataFilterField');
+  const opSel    = document.getElementById('dataFilterOp');
+  const valIn    = document.getElementById('dataFilterValue');
+  const val2In   = document.getElementById('dataFilterValue2');
+  const status   = document.getElementById('dataFilterStatus');
+  const clearLnk = document.getElementById('clearDataFilter');
+
+  function parseValue(input) {
+    const t = input.value.trim();
+    if (t === '') return null;
+    const n = Number(t);
+    return isNaN(n) ? null : n;
+  }
+
+  function renderStatus() {
+    const matches = getDataFilterMatchingZips();
+    const isActive = isDataFilterActive();
+    if (isActive && matches) {
+      // Compose with market + manager filters too — show how many of those
+      // matching ZIPs are actually in the current viewable scope
+      const inScope = getInScopeZips().length;
+      status.textContent = `${matches.size.toLocaleString()} ZIPs match (${inScope.toLocaleString()} in current scope)`;
+      status.classList.add('active');
+      clearLnk.classList.remove('disabled');
+    } else if (fieldSel.value && (valIn.value === '' || (opSel.value === 'between' && val2In.value === ''))) {
+      status.textContent = 'Enter a value to apply the filter.';
+      status.classList.remove('active');
+      clearLnk.classList.add('disabled');
+    } else {
+      status.textContent = '';
+      status.classList.remove('active');
+      clearLnk.classList.add('disabled');
+    }
+  }
+
+  function setInputsEnabled() {
+    const hasField = !!fieldSel.value;
+    opSel.disabled  = !hasField;
+    valIn.disabled  = !hasField;
+    const isBetween = opSel.value === 'between';
+    val2In.style.display = isBetween ? '' : 'none';
+    val2In.disabled = !hasField || !isBetween;
+    // Adapt placeholder + step to the field
+    const placeholders = {
+      median_household_income: { val: 'e.g., 100000', step: 1000 },
+      population:              { val: 'e.g., 10000',  step: 100  },
+      population_density:      { val: 'e.g., 5000',   step: 100  },
+      pct_hispanic:            { val: 'e.g., 30',     step: 1    },
+      pct_white_nh:            { val: 'e.g., 50',     step: 1    },
+      pct_black_nh:            { val: 'e.g., 20',     step: 1    },
+      pct_asian_nh:            { val: 'e.g., 10',     step: 1    },
+      pct_other_nh:            { val: 'e.g., 5',      step: 1    },
+    };
+    const p = placeholders[fieldSel.value] || { val: 'value', step: 1 };
+    valIn.placeholder  = p.val;
+    val2In.placeholder = 'and…';
+    valIn.step = p.step;
+    val2In.step = p.step;
+  }
+
+  function pushFromUI() {
+    DATA_FILTER.field    = fieldSel.value || null;
+    DATA_FILTER.operator = opSel.value;
+    DATA_FILTER.value    = parseValue(valIn);
+    DATA_FILTER.value2   = parseValue(val2In);
+    setInputsEnabled();
+    renderStatus();
+    // Re-style the ZIP layer and re-render markers + demographics
+    if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+    applyFiltersAndRender();
+  }
+
+  fieldSel.addEventListener('change', pushFromUI);
+  opSel.addEventListener('change',    pushFromUI);
+  valIn.addEventListener('input',     pushFromUI);
+  val2In.addEventListener('input',    pushFromUI);
+
+  clearLnk.addEventListener('click', () => {
+    fieldSel.value = '';
+    opSel.value = 'gt';
+    valIn.value = '';
+    val2In.value = '';
+    pushFromUI();
+  });
+
+  // Initial state
+  setInputsEnabled();
+})();
 
 loadAll();
 </script>
