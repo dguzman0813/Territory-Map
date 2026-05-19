@@ -432,6 +432,9 @@
       <button class="market-btn" data-view="CHICAGO_MIL">
         Chicago + Milwaukee <span class="count" data-count="CHICAGO_MIL">—</span>
       </button>
+      <button class="market-btn" data-view="SACRAMENTO">
+        Sacramento <span class="count" data-count="SACRAMENTO">—</span>
+      </button>
     </div>
 
     <div class="filters">
@@ -845,8 +848,10 @@ function showView(viewName) {
     drawOverlaysForMarkets(['LOS ANGELES']);
   } else if (viewName === 'CHICAGO_MIL') {
     drawOverlaysForMarkets(['CHICAGO', 'MILWAUKEE']);
+  } else if (viewName === 'SACRAMENTO') {
+    drawOverlaysForMarkets(['SACRAMENTO']);
   } else {
-    drawOverlaysForMarkets(['LOS ANGELES', 'CHICAGO', 'MILWAUKEE']);
+    drawOverlaysForMarkets(['LOS ANGELES', 'CHICAGO', 'MILWAUKEE', 'SACRAMENTO']);
   }
 
   applyFiltersAndRender();
@@ -862,6 +867,8 @@ function applyFiltersAndRender() {
     scope = ADDRESSES.filter(a => a.market === 'LOS ANGELES');
   } else if (CURRENT_VIEW === 'CHICAGO_MIL') {
     scope = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE');
+  } else if (CURRENT_VIEW === 'SACRAMENTO') {
+    scope = ADDRESSES.filter(a => a.market === 'SACRAMENTO');
   } else {
     scope = ADDRESSES;
   }
@@ -1010,12 +1017,13 @@ function updateZoneList(addrs) {
     counts[zid] = (counts[zid] || 0) + 1;
   });
 
-  // Order: LA zones, Chicago zones, Milwaukee, then anything else (incl unassigned)
+  // Order: LA zones, Chicago zones, Milwaukee, Sacramento, then anything else (incl unassigned)
   const knownIds = Object.keys(ZONES);
   const laIds = knownIds.filter(id => ZONES[id].market === 'LOS ANGELES');
   const chiIds = knownIds.filter(id => ZONES[id].market === 'CHICAGO');
   const milIds = knownIds.filter(id => ZONES[id].market === 'MILWAUKEE');
-  const orderedIds = [...laIds, ...chiIds, ...milIds];
+  const sacIds = knownIds.filter(id => ZONES[id].market === 'SACRAMENTO');
+  const orderedIds = [...laIds, ...chiIds, ...milIds, ...sacIds];
 
   const list = document.getElementById('zoneList');
   list.innerHTML = '';
@@ -1058,6 +1066,7 @@ function renderZoneStructure() {
   if (byMarket['LOS ANGELES']) lines.push(`<div>• <b>LA:</b> ${byMarket['LOS ANGELES']} zones</div>`);
   if (byMarket['CHICAGO'])     lines.push(`<div>• <b>Chicago:</b> ${byMarket['CHICAGO']} zones</div>`);
   if (byMarket['MILWAUKEE'])   lines.push(`<div>• <b>Milwaukee + N. IL:</b> ${byMarket['MILWAUKEE']} zone${byMarket['MILWAUKEE']>1?'s':''}</div>`);
+  if (byMarket['SACRAMENTO'])  lines.push(`<div>• <b>Sacramento:</b> ${byMarket['SACRAMENTO']} zone${byMarket['SACRAMENTO']>1?'s':''}</div>`);
   lines.push(`<div style="margin-top:6px"><b>${total} managers total</b></div>`);
 
   document.getElementById('zoneStructure').innerHTML = lines.join('');
@@ -1092,19 +1101,21 @@ function updateMarketCounts() {
   const all = ADDRESSES.length;
   const la = ADDRESSES.filter(a => a.market === 'LOS ANGELES').length;
   const cm = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE').length;
+  const sac = ADDRESSES.filter(a => a.market === 'SACRAMENTO').length;
   document.querySelector('[data-count="ALL"]').textContent = all.toLocaleString();
   document.querySelector('[data-count="LOS ANGELES"]').textContent = la.toLocaleString();
   document.querySelector('[data-count="CHICAGO_MIL"]').textContent = cm.toLocaleString();
+  document.querySelector('[data-count="SACRAMENTO"]').textContent = sac.toLocaleString();
 }
 
 // ============================================================================
 // FILTERS — sidebar pill controls for managers, carriers, and search
 // ============================================================================
 function buildFilterControls() {
-  // ---- Manager pills, ordered like the zone list (LA, Chicago, Milwaukee) ----
+  // ---- Manager pills, ordered like the zone list (LA, Chicago, Milwaukee, Sacramento) ----
   const managerEntries = [];
   const seen = new Set();
-  const ordered = ['LOS ANGELES', 'CHICAGO', 'MILWAUKEE'];
+  const ordered = ['LOS ANGELES', 'CHICAGO', 'MILWAUKEE', 'SACRAMENTO'];
   ordered.forEach(market => {
     Object.values(ZONES).forEach(z => {
       if (z.market !== market) return;
@@ -1318,6 +1329,7 @@ function getInScopeZips() {
   let marketScope = null;
   if (CURRENT_VIEW === 'LOS ANGELES') marketScope = ['LOS ANGELES'];
   else if (CURRENT_VIEW === 'CHICAGO_MIL') marketScope = ['CHICAGO', 'MILWAUKEE'];
+  else if (CURRENT_VIEW === 'SACRAMENTO') marketScope = ['SACRAMENTO'];
   // else null = no market filter (ALL view)
 
   const result = [];
@@ -1341,6 +1353,7 @@ function describeScope() {
   const parts = [];
   if (CURRENT_VIEW === 'LOS ANGELES') parts.push('Los Angeles');
   else if (CURRENT_VIEW === 'CHICAGO_MIL') parts.push('Chicago + Milwaukee');
+  else if (CURRENT_VIEW === 'SACRAMENTO') parts.push('Sacramento');
   else parts.push('all markets');
 
   if (FILTERS.managers.size > 0) {
@@ -1489,10 +1502,18 @@ function pointInLatLngPolygon(lat, lng, polygon) {
 // The Apps Script version operates on an address row; this version operates on
 // a ZIP's properties + centroid, which are what we have in the GeoJSON.
 function assignZoneForZip(zipProps, centroidLatLng) {
-  // Derive a "market" for this ZIP from its state, since the GeoJSON doesn't
-  // carry a market field. Mirrors the markets used in zones.json.
-  const stateToMarket = { CA: 'LOS ANGELES', IL: 'CHICAGO', IN: 'CHICAGO', WI: 'MILWAUKEE' };
-  const market = stateToMarket[zipProps.state] || null;
+  // Derive a "market" for this ZIP from the market_name property that the
+  // build script (build_zip_layer.py) writes into every GeoJSON feature.
+  // This is keyed off the actual DMA, not the state — so two markets in the
+  // same state (Los Angeles and Sacramento are both CA) resolve correctly.
+  // If a new market is added, add its market_name string here.
+  const marketNameToMarket = {
+    'Los Angeles, CA': 'LOS ANGELES',
+    'Chicago, IL':     'CHICAGO',
+    'Milwaukee, WI':   'MILWAUKEE',
+    'Sacramento, CA':  'SACRAMENTO',
+  };
+  const market = marketNameToMarket[zipProps.market_name] || null;
   const stateFull = { CA: 'California', IL: 'Illinois', IN: 'Indiana', WI: 'Wisconsin' }[zipProps.state] || zipProps.state;
 
   for (const rule of ASSIGNMENT_RULES) {
