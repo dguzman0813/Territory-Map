@@ -1,7 +1,7 @@
 {
-  "version": "1.9",
+  "version": "1.11",
   "last_updated": "2026-05-19",
-  "notes": "v1.9 (2026-05-19): Added the Sacramento market (Nielsen DMA 862, Sacramento-Stockton-Modesto). One zone, SAC-METRO, covering all 365 Tier 1 ZIPs across 17 counties from the Sacramento metro south to Modesto and east into the Sierra foothills. Account manager: Alex Acuna (reassigned here from the dissolved LA-NORTH zone in v1.8). Assignment is via the existing zip_assignments zip_list rule; no new rule type needed. A market_views entry and a Sacramento market button were added to index.html. zip_layer.geojson and zip_demographics.json must be regenerated to include the new ZIPs before this market renders. After Sacramento addresses appear in the Sheet, run migrateZoneIds() to assign them.",
+  "notes": "v1.11 (2026-05-19): Moved ZIPs 91501 and 91504 (Burbank) from LA-CENTRAL to LA-WEST. This consolidates all five Burbank ZIPs (91501/91502/91504/91505/91506) into LA-WEST under Albert Trevino. 91502/91505/91506 were already in LA-WEST; 91501 and 91504 had remained in LA-CENTRAL (they came over with old LA-EAST in the v1.8 restructure). LA-WEST 218->220, LA-CENTRAL 144->142; LA total unchanged at 512. After committing, run migrateZoneIds() in the Apps Script to re-assign any existing Sheet rows with ZIP 91501 or 91504.",
   "zones": {
     "Chicago-CENTRAL": {
       "label": "Chicago Central",
@@ -48,7 +48,7 @@
     "SAC-METRO": {
       "label": "Sacramento Metro & Foothills",
       "market": "SACRAMENTO",
-      "color": "#1dffc1",
+      "color": "#6d28d9",
       "description": "Sacramento-Stockton-Modesto DMA: the Sacramento metro, Stockton and San Joaquin Valley, Modesto/Stanislaus, the Solano and Yolo corridor, and the Sierra foothill counties (Placer, El Dorado, Amador, Calaveras, Tuolumne, Nevada, Plumas, Sierra). 365 Tier 1 ZIPs across 17 counties.",
       "account_manager": "Alex Acuna"
     }
@@ -879,7 +879,9 @@
             "91411",
             "91423",
             "91436",
+            "91501",
             "91502",
+            "91504",
             "91505",
             "91506",
             "91601",
@@ -977,8 +979,6 @@
             "91107",
             "91108",
             "91125",
-            "91501",
-            "91504",
             "91702",
             "91706",
             "91711",
@@ -1962,6 +1962,8 @@
     "2026-05-07 (v1.6): Moved 25 SBD ZIPs (high desert + eastern Mojave) from LA-NORTH to LA-INLAND. Alex Acuna's territory shrinks to metro LA / Antelope Valley / Inyo County desert. Zoila Ladd's territory expands to cover the full San Bernardino County extent outside Inyo (Riverside County + all of SBD).",
     "2026-05-08 (v1.7): 4 LaSalle County IL ZIPs (61316/61321/61354/61358) moved from Chicago-CENTRAL to Chicago-SOUTH after visual confirmation they sit inside Jorge's surrounding territory.",
     "2026-05-19 (v1.8): LA restructured 4 zones -> 3. LA-NORTH dissolved, Alex Acuna off the LA market (-> Sacramento, Task 2). LA-WEST = old LA-WEST + SFV/Glendale/Burbank/Santa Clarita/Ventura + all Long Beach (218 ZIPs). LA-CENTRAL = old LA-EAST minus Long Beach + Antelope Valley desert + 12 LA-County east-valley ZIPs (144 ZIPs). LA-EAST = old LA-INLAND minus those 12 + 10 Inyo desert ZIPs (150 ZIPs). North OC stays in LA-CENTRAL. LA total 512 unchanged. polygon_overlays NOT updated (cosmetic, not drawn). Run migrateZoneIds() after committing.",
-    "2026-05-19 (v1.9): Added Sacramento market. SAC-METRO zone, 365 Tier 1 ZIPs, Alex Acuna. Single zip_list assignment, no new rule type. index.html updated: market detection now reads the geojson market_name property (marketNameToMarket) instead of guessing market from state, so the two CA markets (Los Angeles, Sacramento) are distinguished correctly. To split SAC-METRO into multiple zones later, partition the ZIP array as usual."
+    "2026-05-19 (v1.9): Added Sacramento market. SAC-METRO zone, 365 Tier 1 ZIPs, Alex Acuna. Single zip_list assignment, no new rule type. index.html updated: market detection now reads the geojson market_name property (marketNameToMarket) instead of guessing market from state, so the two CA markets (Los Angeles, Sacramento) are distinguished correctly. To split SAC-METRO into multiple zones later, partition the ZIP array as usual.",
+    "2026-05-19 (v1.10): SAC-METRO color #1dffc1 -> #6d28d9. Cosmetic only.",
+    "2026-05-19 (v1.11): Burbank 91501 and 91504 moved LA-CENTRAL -> LA-WEST so all five Burbank ZIPs sit in one zone. LA-WEST 220, LA-CENTRAL 142."
   ]
 }
