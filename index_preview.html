@@ -1771,4 +1771,33 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
     DATA_FILTER.field    = fieldSel.value || null;
     DATA_FILTER.operator = opSel.value;
     DATA_FILTER.value    = parseValue(valIn);
-    DATA_FILTER.value2   = pa
+    DATA_FILTER.value2   = parseValue(val2In);
+    setInputsEnabled();
+    renderStatus();
+    // Re-style the ZIP layer and re-render markers + demographics
+    if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+    applyFiltersAndRender();
+  }
+
+  fieldSel.addEventListener('change', pushFromUI);
+  opSel.addEventListener('change',    pushFromUI);
+  valIn.addEventListener('input',     pushFromUI);
+  val2In.addEventListener('input',    pushFromUI);
+
+  clearLnk.addEventListener('click', () => {
+    fieldSel.value = '';
+    opSel.value = 'gt';
+    valIn.value = '';
+    val2In.value = '';
+    pushFromUI();
+  });
+
+  // Initial state
+  setInputsEnabled();
+})();
+
+loadAll();
+</script>
+
+</body>
+</html>
