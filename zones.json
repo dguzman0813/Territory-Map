@@ -1,6 +1,6 @@
 {
-  "version": "1.12",
-  "last_updated": "2026-05-20",
+  "version": "1.13",
+  "last_updated": "2026-06-19",
   "notes": "v1.12 (2026-05-20): Restructured the Chicago + Milwaukee market. Same three managers (Ana Lopes, Elizabeth Varela, Jorge Rodriguez) but new geographic split. Ana's IL footprint shrinks to just the northern strips of Lake County IL and McHenry County IL (lat >= ~42.31, the towns nearest the WI border) plus Great Lakes Naval Station (60088). Liz now owns the southwest IL collar: all of Kane, DeKalb, Kendall, Grundy, LaSalle, plus west DuPage (Wheaton/Naperville/Glen Ellyn), west Will (Plainfield/Bolingbrook/Romeoville), west Kankakee, NW Cook (Schaumburg/Hoffman Estates/Palatine 60067), south McHenry (Crystal Lake/Algonquin/Cary), and two west Lake-IL ZIPs (Barrington 60010, Wauconda 60084). Jorge gets almost all of Cook County (the city of Chicago and nearly every suburb except the NW sliver), east DuPage, east Will, east Kankakee, the south Lake-IL east-shore corridor (Highland Park/Lake Forest/Libertyville/Vernon Hills/Deerfield/Buffalo Grove/Mundelein/Lake Zurich), and unchanged: all NW Indiana (Lake-IN, Porter, LaPorte, Newton, Jasper). LaSalle County (26 ZIPs) moves back to Liz, reversing the v1.7 transfer. The `northern_il_to_milwaukee` county_list fallback rule is REMOVED \u2014 the Lake/McHenry IL ZIPs are now split between three managers, so a wholesale county-based fallback would be wrong. Any new Lake/McHenry IL ZIP added later will require an explicit assignment. The `milwaukee_market` rule (Milwaukee DMA -> Ana) is retained unchanged. New totals: Ana 188 (was 212), Liz 142 (was 128), Jorge 266 (was 256). Market total unchanged at 596.",
   "zones": {
     "Chicago-CENTRAL": {
@@ -8,7 +8,7 @@
       "market": "CHICAGO",
       "color": "#7c3aed",
       "description": "NW Cook (Schaumburg/Hoffman Estates/Streamwood/Hanover Park/Palatine 60067), west DuPage (Wheaton/Naperville/Glen Ellyn/Bloomingdale/Bartlett), all Kane (Aurora/Elgin/Geneva/St. Charles), all DeKalb, all Kendall (Yorkville/Oswego), all Grundy (Morris), all LaSalle (Ottawa/Streator), west Will (Plainfield/Bolingbrook/Romeoville), west Kankakee, south McHenry (Crystal Lake/Algonquin/Cary/Lake in the Hills), and two west Lake-IL ZIPs (Barrington 60010, Wauconda 60084).",
-      "account_manager": "Elizabeth Varela"
+      "account_manager": "Jorge Rodriguez"
     },
     "Chicago-SOUTH": {
       "label": "Chicago City, South Suburbs & NW Indiana",
@@ -36,7 +36,7 @@
       "market": "LOS ANGELES",
       "color": "#9333ea",
       "description": "Central LA basin (downtown, East LA), San Gabriel Valley, Pasadena-area foothills, the LA-County east valley (Glendora, San Dimas, Claremont, Pomona, Diamond Bar), north Orange County (Anaheim, Santa Ana, Fullerton, Garden Grove, Westminster), and the Antelope Valley high desert (Lancaster, Palmdale, Acton).",
-      "account_manager": "Julie Lin"
+      "account_manager": "Zoila Ladd"
     },
     "LA-EAST": {
       "label": "LA \u2014 Inland Empire & South OC",
@@ -1949,6 +1949,7 @@
     "2026-05-19 (v1.9): Added Sacramento market. SAC-METRO zone, 365 Tier 1 ZIPs, Alex Acuna. Single zip_list assignment, no new rule type. index.html updated: market detection now reads the geojson market_name property (marketNameToMarket) instead of guessing market from state, so the two CA markets (Los Angeles, Sacramento) are distinguished correctly. To split SAC-METRO into multiple zones later, partition the ZIP array as usual.",
     "2026-05-19 (v1.10): SAC-METRO color #1dffc1 -> #6d28d9. Cosmetic only.",
     "2026-05-19 (v1.11): Burbank 91501 and 91504 moved LA-CENTRAL -> LA-WEST so all five Burbank ZIPs sit in one zone. LA-WEST 220, LA-CENTRAL 142.",
-    "2026-05-20 (v1.12): Chicago + Milwaukee restructure. Ana ceded 24 IL ZIPs (12 to Liz, 12 to Jorge) along a new southern boundary at lat ~42.31 across Lake/McHenry IL, keeping the WI border strip. Liz lost 79 ZIPs to Jorge (most of Cook + east DuPage) and gained 81 from Jorge (LaSalle/Kane/Kendall/Grundy/DeKalb/west DuPage/west Will/west Kankakee/NW Cook) plus 12 from Ana (south McHenry, Barrington/Wauconda). Jorge net +10. Boundary rule: any IL ZIP east of a piecewise-linear line from Mundelein (lat 42.26, lng -88.04) south through Palatine/Elk Grove/Itasca/Lombard/Downers Grove/Lemont/Joliet/Manhattan/Manteno/Bourbonnais (lat 41.12, lng -87.86) belongs to Jorge; west of that line belongs to Liz (unless north of lat 42.31 in Lake/McHenry, which is Ana). 60088 Great Lakes pinned to Ana by override (geographically just south of Ana's strip but surrounded by her ZIPs). REMOVED: northern_il_to_milwaukee county_list fallback \u2014 wholesale Lake/McHenry-to-Ana is no longer correct. RETAINED: milwaukee_market (Milwaukee DMA -> Ana) \u2014 still correct."
+    "2026-05-20 (v1.12): Chicago + Milwaukee restructure. Ana ceded 24 IL ZIPs (12 to Liz, 12 to Jorge) along a new southern boundary at lat ~42.31 across Lake/McHenry IL, keeping the WI border strip. Liz lost 79 ZIPs to Jorge (most of Cook + east DuPage) and gained 81 from Jorge (LaSalle/Kane/Kendall/Grundy/DeKalb/west DuPage/west Will/west Kankakee/NW Cook) plus 12 from Ana (south McHenry, Barrington/Wauconda). Jorge net +10. Boundary rule: any IL ZIP east of a piecewise-linear line from Mundelein (lat 42.26, lng -88.04) south through Palatine/Elk Grove/Itasca/Lombard/Downers Grove/Lemont/Joliet/Manhattan/Manteno/Bourbonnais (lat 41.12, lng -87.86) belongs to Jorge; west of that line belongs to Liz (unless north of lat 42.31 in Lake/McHenry, which is Ana). 60088 Great Lakes pinned to Ana by override (geographically just south of Ana's strip but surrounded by her ZIPs). REMOVED: northern_il_to_milwaukee county_list fallback \u2014 wholesale Lake/McHenry-to-Ana is no longer correct. RETAINED: milwaukee_market (Milwaukee DMA -> Ana) \u2014 still correct.",
+    "2026-06-19 (v1.13): Manager-only swap, no boundary/ZIP changes. Chicago-CENTRAL account_manager Elizabeth Varela -> Jorge Rodriguez (Jorge now owns Chicago-CENTRAL + Chicago-SOUTH). LA-CENTRAL account_manager Julie Lin -> Zoila Ladd (Zoila now owns LA-CENTRAL + LA-EAST). Zone IDs, labels, colors, descriptions, and ZIP lists unchanged; both zones stay distinct. Elizabeth Varela and Julie Lin removed from the active manager roster. index.html unchanged (manager pills dedupe by name, so each now owns two zones under one pill). Run migrateZoneIds() after committing \u2014 this reassigns affected Cricket rows to the new managers AND assigns the newly loaded Non-Wireless Investor (MTL) rows their zone_id + account_manager by ZIP in the same pass."
   ]
 }

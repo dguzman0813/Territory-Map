@@ -928,6 +928,13 @@ function drawOverlaysForMarkets(markets) {
   }
 }
 
+// Pin color is by CARRIER (industry), not zone:
+//   green = Cricket, blue = Non-Wireless Investor (Money Transfer Locations)
+const CARRIER_COLORS = { 'cricket': '#16a34a', 'non-wireless investor': '#2563eb' };
+function pinColor(a) {
+  return CARRIER_COLORS[(a.industry || '').trim().toLowerCase()] || '#9ca3af';
+}
+
 function drawMarkers(addrs) {
   // Stack-offset for pins at the same coordinate (golden-angle spiral, copied from v2)
   const positionCounts = {};
@@ -941,8 +948,7 @@ function drawMarkers(addrs) {
     const lat = a.lat + radius * Math.cos(angle);
     const lng = a.lng + radius * Math.sin(angle);
 
-    const zone = ZONES[a.zone_id];
-    const color = zone ? zone.color : '#9ca3af';  // gray for unassigned
+    const color = pinColor(a);  // green = Cricket, blue = Non-Wireless Investor
 
     const marker = L.circleMarker([lat, lng], {
       radius: 4,
@@ -1156,8 +1162,13 @@ function buildFilterControls() {
       pill.className = 'pill';
       pill.dataset.kind = 'carrier';
       pill.dataset.value = carrier;
-      pill.textContent = carrier;
-      pill.addEventListener('click', () => togglePill('carriers', carrier, '#1f2937', pill));
+      // Colored dot = pin color on the map (green = Cricket, blue = Non-Wireless Investor).
+      // Doubles as the map legend, and the pill fills with that color when active.
+      const col = pinColor({ industry: carrier });
+      pill.innerHTML =
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
+        `background:${col};margin-right:6px;vertical-align:middle"></span>${escapeHtml(carrier)}`;
+      pill.addEventListener('click', () => togglePill('carriers', carrier, col, pill));
       carEl.appendChild(pill);
     });
   }
@@ -1603,7 +1614,7 @@ function styleZipFeature(feat) {
 
   // Default (no data filter): normal zone-colored fill
   if (!zone) return unassignedStyle;
-  return { ...baseStyle, fillOpacity: 0.25, fillColor: zone.color, color: zone.color };
+  return { ...baseStyle, fillOpacity: 0.12, fillColor: zone.color, color: zone.color };
 }
 
 function renderZipLayer() {
@@ -1760,33 +1771,4 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
     DATA_FILTER.field    = fieldSel.value || null;
     DATA_FILTER.operator = opSel.value;
     DATA_FILTER.value    = parseValue(valIn);
-    DATA_FILTER.value2   = parseValue(val2In);
-    setInputsEnabled();
-    renderStatus();
-    // Re-style the ZIP layer and re-render markers + demographics
-    if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
-    applyFiltersAndRender();
-  }
-
-  fieldSel.addEventListener('change', pushFromUI);
-  opSel.addEventListener('change',    pushFromUI);
-  valIn.addEventListener('input',     pushFromUI);
-  val2In.addEventListener('input',    pushFromUI);
-
-  clearLnk.addEventListener('click', () => {
-    fieldSel.value = '';
-    opSel.value = 'gt';
-    valIn.value = '';
-    val2In.value = '';
-    pushFromUI();
-  });
-
-  // Initial state
-  setInputsEnabled();
-})();
-
-loadAll();
-</script>
-
-</body>
-</html>
+    DATA_FILTER.value2   = pa
