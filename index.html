@@ -1169,6 +1169,13 @@ function buildFilterControls() {
         `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
         `background:${col};margin-right:6px;vertical-align:middle"></span>${escapeHtml(carrier)}`;
       pill.addEventListener('click', () => togglePill('carriers', carrier, col, pill));
+      // Default the Carrier filter to Cricket only: on load, show Cricket pins
+      // and hide Non-Wireless Investor (MTL) until the user selects that pill.
+      if (carrier === 'Cricket') {
+        FILTERS.carriers.add(carrier);
+        pill.classList.add('on');
+        pill.style.background = col;
+      }
       carEl.appendChild(pill);
     });
   }
