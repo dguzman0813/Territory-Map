@@ -459,6 +459,16 @@
         <div class="filter-block-label">Carrier</div>
         <div class="pill-group" id="filterCarriers"></div>
       </div>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Opportunity</div>
+        <div class="pill-group" id="filterOpportunities"></div>
+      </div>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Pipeline</div>
+        <div class="pill-group" id="filterPipelines"></div>
+      </div>
     </div>
 
     <div class="layers-block">
@@ -579,6 +589,8 @@ let DEMO_HOVER_ZIP = null;   // ZIP code currently hovered (null = show scope ag
 const FILTERS = {
   managers: new Set(),
   carriers: new Set(),
+  opportunities: new Set(),  // HubSpot opportunity_level
+  pipelines: new Set(),      // HubSpot pipeline
   search: '',
 };
 
@@ -825,6 +837,8 @@ function parseCsv(csvText) {
       contact_email:  (row.contact_email  || '').trim(),
       secondary_phone:(row.secondary_phone|| '').trim(),
       opportunity_level: (row.opportunity_level || '').trim(),
+      pipeline:       (row.pipeline       || '').trim(),
+      deal_stage:     (row.deal_stage     || '').trim(),
       geocode_status: (row.geocode_status || '').trim(),
       zone_id:        (row.zone_id        || '').trim(),
       account_manager:(row.account_manager|| '').trim(),
@@ -889,6 +903,8 @@ function applyFiltersAndRender() {
 function rowMatchesFilters(a) {
   if (FILTERS.managers.size > 0 && !FILTERS.managers.has(a.account_manager)) return false;
   if (FILTERS.carriers.size > 0 && !FILTERS.carriers.has(a.industry)) return false;
+  if (FILTERS.opportunities.size > 0 && !FILTERS.opportunities.has(a.opportunity_level)) return false;
+  if (FILTERS.pipelines.size > 0 && !FILTERS.pipelines.has(a.pipeline)) return false;
   if (FILTERS.search) {
     const q = FILTERS.search;
     const hay = [
@@ -929,10 +945,35 @@ function drawOverlaysForMarkets(markets) {
 }
 
 // Pin color is by CARRIER (industry), not zone:
-//   green = Cricket, blue = Non-Wireless Investor (Money Transfer Locations)
+//   Cricket = green, MTL (Non-Wireless Investor) = blue.
+//   Competitor carriers are fixed by keyword: Boost = orange, Metro = purple, Total = red.
+//   Any other carrier gets a stable color from a fallback palette (assigned by
+//   a hash of the name so the same carrier always gets the same color).
 const CARRIER_COLORS = { 'cricket': '#16a34a', 'non-wireless investor': '#2563eb' };
+// Matched as a case-insensitive substring of the industry value, so this works
+// whether the Sheet says "Boost" or "Boost Mobile", "Metro" or "Metro by T-Mobile", etc.
+const CARRIER_KEYWORD_COLORS = [
+  ['boost', '#f97316'],  // orange
+  ['metro', '#9333ea'],  // purple
+  ['total', '#dc2626'],  // red
+];
+// Distinct hues for any other carrier not named above (excludes green/blue/gold
+// already in use elsewhere on the map).
+const CARRIER_FALLBACK_PALETTE = [
+  '#0d9488', '#db2777', '#ca8a04', '#4f46e5',
+  '#65a30d', '#0ea5e9', '#be123c', '#7c3aed',
+];
 function pinColor(a) {
-  return CARRIER_COLORS[(a.industry || '').trim().toLowerCase()] || '#9ca3af';
+  const ind = (a.industry || '').trim().toLowerCase();
+  if (!ind) return '#9ca3af';
+  if (CARRIER_COLORS[ind]) return CARRIER_COLORS[ind];
+  for (const [kw, col] of CARRIER_KEYWORD_COLORS) {
+    if (ind.includes(kw)) return col;
+  }
+  // Stable fallback: hash the carrier name to a palette slot.
+  let h = 0;
+  for (let i = 0; i < ind.length; i++) h = (h * 31 + ind.charCodeAt(i)) >>> 0;
+  return CARRIER_FALLBACK_PALETTE[h % CARRIER_FALLBACK_PALETTE.length];
 }
 
 function drawMarkers(addrs) {
@@ -1001,6 +1042,8 @@ function buildPopup(a) {
   if (a.industry)          tags.push(`<span class="pop-tag">${escapeHtml(a.industry)}</span>`); // displayed as carrier
   if (a.revenue_tier)      tags.push(`<span class="pop-tag">${escapeHtml(a.revenue_tier)}</span>`);
   if (a.opportunity_level) tags.push(`<span class="pop-tag">Opp: ${escapeHtml(a.opportunity_level)}</span>`);
+  if (a.pipeline)          tags.push(`<span class="pop-tag">Pipeline: ${escapeHtml(a.pipeline)}</span>`);
+  if (a.deal_stage)        tags.push(`<span class="pop-tag">Stage: ${escapeHtml(a.deal_stage)}</span>`);
   tags.push(`<span class="popup-zone" style="background:${zoneColor}">${escapeHtml(zoneLabel)}</span>`);
   out.push(`<div class="pop-meta-row">${tags.join('')}</div>`);
 
@@ -1179,6 +1222,49 @@ function buildFilterControls() {
       carEl.appendChild(pill);
     });
   }
+
+  // ---- Opportunity & Pipeline pills (HubSpot fields) ----
+  // Values are derived from the data so each pill's text exactly matches the
+  // Sheet (a hardcoded label that didn't match would silently filter nothing).
+  // preferredOrder controls display order; anything unexpected is appended A–Z.
+  buildValuePills('filterOpportunities', 'opportunity_level', 'opportunities',
+    ['Prospect', 'In Progress', 'Onboarded', 'Non-Viable']);
+  buildValuePills('filterPipelines', 'pipeline', 'pipelines',
+    ['Cricket Dealer Prospecting', 'Cricket Door Pre-Approval', 'Cricket Dealer Onboarding']);
+}
+
+// Build a pill group for a HubSpot text field (opportunity_level / pipeline).
+// Mirrors the Carrier pills, but uses a single neutral accent color for the
+// active state since these fields have no inherent map color. Empty set =
+// "show all" (same convention as the other filters).
+const VALUE_PILL_ACTIVE_COLOR = '#2563eb';
+function buildValuePills(containerId, fieldKey, setName, preferredOrder) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const distinct = Array.from(new Set(
+    ADDRESSES.map(a => a[fieldKey]).filter(Boolean)
+  ));
+  const rank = (v) => {
+    const i = preferredOrder.indexOf(v);
+    return i === -1 ? preferredOrder.length : i;
+  };
+  distinct.sort((x, y) => (rank(x) - rank(y)) || x.localeCompare(y));
+
+  el.innerHTML = '';
+  if (distinct.length === 0) {
+    el.innerHTML = '<div style="font-size:11px; color:#9ca3af; font-style:italic">None loaded yet</div>';
+    return;
+  }
+  distinct.forEach(val => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'pill';
+    pill.dataset.kind = setName;
+    pill.dataset.value = val;
+    pill.textContent = val;
+    pill.addEventListener('click', () => togglePill(setName, val, VALUE_PILL_ACTIVE_COLOR, pill));
+    el.appendChild(pill);
+  });
 }
 
 function togglePill(setName, value, color, el) {
@@ -1198,6 +1284,8 @@ function togglePill(setName, value, color, el) {
 function clearAllFilters() {
   FILTERS.managers.clear();
   FILTERS.carriers.clear();
+  FILTERS.opportunities.clear();
+  FILTERS.pipelines.clear();
   FILTERS.search = '';
   document.getElementById('filterSearch').value = '';
   document.querySelectorAll('.pill.on').forEach(p => {
@@ -1212,6 +1300,8 @@ function updateClearLink() {
   const anyActive =
     FILTERS.managers.size > 0 ||
     FILTERS.carriers.size > 0 ||
+    FILTERS.opportunities.size > 0 ||
+    FILTERS.pipelines.size > 0 ||
     FILTERS.search.length > 0;
   link.classList.toggle('disabled', !anyActive);
 }
