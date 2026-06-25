@@ -270,6 +270,30 @@
   .filter-search:focus { border-color: #2563eb; }
   .filter-search::placeholder { color: #9ca3af; }
 
+  /* ---- Search typeahead dropdown ---- */
+  .search-typeahead { position: relative; }
+  .search-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%; left: 0; right: 0;
+    z-index: 1500;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-top: 4px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    overflow: hidden;
+  }
+  .search-suggestion {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .search-suggestion:last-child { border-bottom: none; }
+  .search-suggestion:hover, .search-suggestion.active { background: #eff6ff; }
+  .search-suggestion .addr { color: #111827; font-weight: 500; font-size: 13px; }
+  .search-suggestion .meta { color: #6b7280; font-size: 11px; margin-top: 1px; }
+
   .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
   .pill {
     display: inline-block;
@@ -444,10 +468,13 @@
       </h3>
 
       <div class="filter-block">
-        <div class="filter-block-label">Search</div>
-        <input type="text" id="filterSearch" class="filter-search"
-               placeholder="ZIP, city, state, contact, company…"
-               autocomplete="off">
+        <div class="filter-block-label">Find a location</div>
+        <div class="search-typeahead">
+          <input type="text" id="filterSearch" class="filter-search"
+                 placeholder="Start typing an address or company…"
+                 autocomplete="off">
+          <div class="search-suggestions" id="searchSuggestions"></div>
+        </div>
       </div>
 
       <div class="filter-block">
@@ -597,7 +624,6 @@ const FILTERS = {
   worked: new Set(),         // computed Contact Status: Not Contacted / Contacted
   opportunities: new Set(),  // HubSpot opportunity_level
   pipelines: new Set(),      // HubSpot pipeline
-  search: '',
 };
 
 // Day 2+: Census data filter. When `field` is null the filter is inactive
@@ -914,13 +940,6 @@ function rowMatchesFilters(a) {
   if (FILTERS.worked.size > 0 && !FILTERS.worked.has(workedStatus(a))) return false;
   if (FILTERS.opportunities.size > 0 && !FILTERS.opportunities.has(a.opportunity_level)) return false;
   if (FILTERS.pipelines.size > 0 && !FILTERS.pipelines.has(a.pipeline)) return false;
-  if (FILTERS.search) {
-    const q = FILTERS.search;
-    const hay = [
-      a.zip, a.city, a.state, a.contact_name, a.company_name,
-    ].join(' ').toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
   // Day 2+: hide pins on ZIPs that don't match the active data filter.
   // If no filter is active, zipMatchesDataFilter always returns true.
   if (isDataFilterActive() && !zipMatchesDataFilter(a.zip)) return false;
@@ -1313,8 +1332,8 @@ function clearAllFilters() {
   FILTERS.worked.clear();
   FILTERS.opportunities.clear();
   FILTERS.pipelines.clear();
-  FILTERS.search = '';
   document.getElementById('filterSearch').value = '';
+  clearSearchResult();
   document.querySelectorAll('.pill.on').forEach(p => {
     p.classList.remove('on');
     p.style.background = '';
@@ -1329,8 +1348,7 @@ function updateClearLink() {
     FILTERS.carriers.size > 0 ||
     FILTERS.worked.size > 0 ||
     FILTERS.opportunities.size > 0 ||
-    FILTERS.pipelines.size > 0 ||
-    FILTERS.search.length > 0;
+    FILTERS.pipelines.size > 0;
   link.classList.toggle('disabled', !anyActive);
 }
 
@@ -1810,10 +1828,103 @@ document.querySelectorAll('.market-btn').forEach(btn => {
   });
 });
 
-document.getElementById('filterSearch').addEventListener('input', e => {
-  FILTERS.search = e.target.value.trim().toLowerCase();
-  applyFiltersAndRender();
-});
+// ============================================================================
+// SEARCH TYPEAHEAD — find a specific location by address/company, then zoom to it.
+// Replaces the old live-filter search. Searches ALL loaded rows (ignores the
+// active Carrier/Opportunity/etc. filters and the market view), so a hidden pin
+// can still be found; selecting one drops a highlighted marker and opens its
+// info box.
+// ============================================================================
+const SEARCH_RESULT_LAYER = L.layerGroup().addTo(map);
+
+function clearSearchResult() {
+  SEARCH_RESULT_LAYER.clearLayers();
+  const box = document.getElementById('searchSuggestions');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+// Drop a highlighted marker at the chosen row, zoom in, and open its popup.
+function showSearchResult(a) {
+  SEARCH_RESULT_LAYER.clearLayers();
+  const marker = L.circleMarker([a.lat, a.lng], {
+    radius: 8, fillColor: pinColor(a), color: '#eab308', weight: 3, fillOpacity: 0.95,
+  });
+  marker.bindPopup(buildPopup(a));
+  marker.addTo(SEARCH_RESULT_LAYER);
+  marker.bringToFront();
+  map.setView([a.lat, a.lng], 17);
+  marker.openPopup();
+}
+
+(function wireSearchTypeahead() {
+  const input = document.getElementById('filterSearch');
+  const box   = document.getElementById('searchSuggestions');
+  if (!input || !box) return;
+  let matches = [];
+  let activeIdx = -1;
+
+  function close() { box.style.display = 'none'; box.innerHTML = ''; activeIdx = -1; matches = []; }
+
+  function render() {
+    if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = matches.map((m, i) => {
+      const addr = m.address || '(no address)';
+      const meta = [m.company_name, [m.city, m.state].filter(Boolean).join(', ')]
+        .filter(Boolean).join(' · ');
+      return `<div class="search-suggestion${i === activeIdx ? ' active' : ''}" data-i="${i}">` +
+             `<div class="addr">${escapeHtml(addr)}</div>` +
+             `<div class="meta">${escapeHtml(meta)}</div></div>`;
+    }).join('');
+    box.style.display = 'block';
+  }
+
+  // Match address + company, case-insensitive, across ALL rows. Cap at 3.
+  function compute(q) {
+    q = q.trim().toLowerCase();
+    matches = [];
+    activeIdx = -1;
+    if (q.length < 2) return;
+    for (const a of ADDRESSES) {
+      const hay = ((a.address || '') + ' ' + (a.company_name || '')).toLowerCase();
+      if (hay.includes(q)) { matches.push(a); if (matches.length >= 3) break; }
+    }
+    if (matches.length) activeIdx = 0;
+  }
+
+  function choose(i) {
+    const m = matches[i];
+    if (!m) return;
+    input.value = m.address || m.company_name || '';
+    close();
+    showSearchResult(m);
+  }
+
+  input.addEventListener('input', (e) => {
+    if (!e.target.value.trim()) SEARCH_RESULT_LAYER.clearLayers();
+    compute(e.target.value);
+    render();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (box.style.display === 'none') return;
+    if (e.key === 'ArrowDown')    { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, matches.length - 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); render(); }
+    else if (e.key === 'Enter')   { e.preventDefault(); if (activeIdx >= 0) choose(activeIdx); }
+    else if (e.key === 'Escape')  { close(); }
+  });
+
+  // mousedown (not click) so it fires before the input's blur hides the box.
+  box.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.search-suggestion');
+    if (!el) return;
+    e.preventDefault();
+    choose(parseInt(el.dataset.i, 10));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-typeahead')) close();
+  });
+})();
 
 document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
 
