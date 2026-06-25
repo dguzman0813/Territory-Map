@@ -461,6 +461,11 @@
       </div>
 
       <div class="filter-block">
+        <div class="filter-block-label">Contact Status</div>
+        <div class="pill-group" id="filterWorked"></div>
+      </div>
+
+      <div class="filter-block">
         <div class="filter-block-label">Opportunity</div>
         <div class="pill-group" id="filterOpportunities"></div>
       </div>
@@ -589,6 +594,7 @@ let DEMO_HOVER_ZIP = null;   // ZIP code currently hovered (null = show scope ag
 const FILTERS = {
   managers: new Set(),
   carriers: new Set(),
+  worked: new Set(),         // computed Contact Status: Not Contacted / Contacted
   opportunities: new Set(),  // HubSpot opportunity_level
   pipelines: new Set(),      // HubSpot pipeline
   search: '',
@@ -902,7 +908,10 @@ function applyFiltersAndRender() {
 
 function rowMatchesFilters(a) {
   if (FILTERS.managers.size > 0 && !FILTERS.managers.has(a.account_manager)) return false;
-  if (FILTERS.carriers.size > 0 && !FILTERS.carriers.has(a.industry)) return false;
+  // Carrier: an empty selection now means "show no pins" — at least one carrier
+  // must be selected. (Unselecting all hides everything instead of reverting to all.)
+  if (!FILTERS.carriers.has(a.industry)) return false;
+  if (FILTERS.worked.size > 0 && !FILTERS.worked.has(workedStatus(a))) return false;
   if (FILTERS.opportunities.size > 0 && !FILTERS.opportunities.has(a.opportunity_level)) return false;
   if (FILTERS.pipelines.size > 0 && !FILTERS.pipelines.has(a.pipeline)) return false;
   if (FILTERS.search) {
@@ -976,6 +985,19 @@ function pinColor(a) {
   return CARRIER_FALLBACK_PALETTE[h % CARRIER_FALLBACK_PALETTE.length];
 }
 
+// Compute "Contact Status" from the HubSpot pipeline/deal_stage fields.
+// A lead still at the "New Lead" entry stage hasn't been worked → "Not Contacted".
+// Any other deal stage (it moved at all) → "Contacted". Rows with no deal record
+// at all (e.g., competitor doors) return '' and carry no status.
+const NEW_LEAD_STAGE = 'new lead';  // compared case-insensitively
+function workedStatus(a) {
+  const stage = (a.deal_stage || '').trim();
+  const pipe  = (a.pipeline   || '').trim();
+  if (!stage && !pipe) return '';
+  if (stage.toLowerCase() === NEW_LEAD_STAGE) return 'Not Contacted';
+  return 'Contacted';
+}
+
 function drawMarkers(addrs) {
   // Stack-offset for pins at the same coordinate (golden-angle spiral, copied from v2)
   const positionCounts = {};
@@ -1032,7 +1054,6 @@ function buildPopup(a) {
   if (a.address)      locBits.push(`<div class="pop-line">${escapeHtml(a.address)}</div>`);
   if (cityStateZip)   locBits.push(`<div class="pop-line">${escapeHtml(cityStateZip)}</div>`);
   if (a.county)       locBits.push(`<div class="pop-line"><span class="lbl">County</span>${escapeHtml(a.county)}</div>`);
-  if (a.market)       locBits.push(`<div class="pop-line"><span class="lbl">Market</span>${escapeHtml(a.market)}</div>`);
   if (locBits.length) {
     out.push(`<div class="pop-section"><div class="pop-section-label">Location</div>${locBits.join('')}</div>`);
   }
@@ -1042,6 +1063,8 @@ function buildPopup(a) {
   if (a.industry)          tags.push(`<span class="pop-tag">${escapeHtml(a.industry)}</span>`); // displayed as carrier
   if (a.revenue_tier)      tags.push(`<span class="pop-tag">${escapeHtml(a.revenue_tier)}</span>`);
   if (a.opportunity_level) tags.push(`<span class="pop-tag">Opp: ${escapeHtml(a.opportunity_level)}</span>`);
+  const wk = workedStatus(a);
+  if (wk)                  tags.push(`<span class="pop-tag">${escapeHtml(wk)}</span>`);
   if (a.pipeline)          tags.push(`<span class="pop-tag">Pipeline: ${escapeHtml(a.pipeline)}</span>`);
   if (a.deal_stage)        tags.push(`<span class="pop-tag">Stage: ${escapeHtml(a.deal_stage)}</span>`);
   tags.push(`<span class="popup-zone" style="background:${zoneColor}">${escapeHtml(zoneLabel)}</span>`);
@@ -1227,6 +1250,8 @@ function buildFilterControls() {
   // Values are derived from the data so each pill's text exactly matches the
   // Sheet (a hardcoded label that didn't match would silently filter nothing).
   // preferredOrder controls display order; anything unexpected is appended A–Z.
+  buildValuePills('filterWorked', workedStatus, 'worked',
+    ['Not Contacted', 'Contacted']);
   buildValuePills('filterOpportunities', 'opportunity_level', 'opportunities',
     ['Prospect', 'In Progress', 'Onboarded', 'Non-Viable']);
   buildValuePills('filterPipelines', 'pipeline', 'pipelines',
@@ -1238,11 +1263,12 @@ function buildFilterControls() {
 // active state since these fields have no inherent map color. Empty set =
 // "show all" (same convention as the other filters).
 const VALUE_PILL_ACTIVE_COLOR = '#2563eb';
-function buildValuePills(containerId, fieldKey, setName, preferredOrder) {
+function buildValuePills(containerId, fieldOrGetter, setName, preferredOrder) {
   const el = document.getElementById(containerId);
   if (!el) return;
+  const getVal = typeof fieldOrGetter === 'function' ? fieldOrGetter : (a => a[fieldOrGetter]);
   const distinct = Array.from(new Set(
-    ADDRESSES.map(a => a[fieldKey]).filter(Boolean)
+    ADDRESSES.map(getVal).filter(Boolean)
   ));
   const rank = (v) => {
     const i = preferredOrder.indexOf(v);
@@ -1284,6 +1310,7 @@ function togglePill(setName, value, color, el) {
 function clearAllFilters() {
   FILTERS.managers.clear();
   FILTERS.carriers.clear();
+  FILTERS.worked.clear();
   FILTERS.opportunities.clear();
   FILTERS.pipelines.clear();
   FILTERS.search = '';
@@ -1300,6 +1327,7 @@ function updateClearLink() {
   const anyActive =
     FILTERS.managers.size > 0 ||
     FILTERS.carriers.size > 0 ||
+    FILTERS.worked.size > 0 ||
     FILTERS.opportunities.size > 0 ||
     FILTERS.pipelines.size > 0 ||
     FILTERS.search.length > 0;
