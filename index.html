@@ -459,6 +459,9 @@
       <button class="market-btn" data-view="SACRAMENTO">
         Sacramento <span class="count" data-count="SACRAMENTO">—</span>
       </button>
+      <button class="market-btn" data-view="NY_NJ">
+        New York + New Jersey <span class="count" data-count="NY_NJ">—</span>
+      </button>
     </div>
 
     <div class="filters">
@@ -605,6 +608,33 @@ let POLY_OVERLAYS = {};    // { zone_id: [[lat,lng], ...] }
 let ASSIGNMENT_RULES = []; // assignment_rules from zones.json — used to color ZIPs by zone
 let ADDRESSES = [];        // normalized rows with valid lat/lng
 let CURRENT_VIEW = 'ALL';  // last-clicked market button — re-rendering keeps the same view
+
+// ---------------------------------------------------------------------------
+// MARKET VIEWS — which `market` values each button covers.
+//
+// New York + New Jersey is one button spanning 11 Nielsen DMAs, so it needs a
+// list rather than a single string. Defined once here and read by every branch
+// below, so adding a market later is a one-line change instead of a hunt
+// through six functions.
+// ---------------------------------------------------------------------------
+const NY_NJ_MARKETS = [
+  'NEW YORK',                 // NYC, Long Island, Lower Hudson, North Jersey
+  'PHILADELPHIA',             // South Jersey
+  'BUFFALO', 'ROCHESTER', 'ALBANY-SCHENECTADY-TROY', 'SYRACUSE',
+  'UTICA', 'BINGHAMTON', 'WATERTOWN', 'ELMIRA (CORNING)',
+  'BURLINGTON-PLATTSBURGH',
+];
+const LEGACY_MARKETS = ['LOS ANGELES', 'CHICAGO', 'MILWAUKEE', 'SACRAMENTO'];
+const ALL_MARKETS = [...LEGACY_MARKETS, ...NY_NJ_MARKETS];
+
+// Returns the market values a view covers, or null for the ALL view (no filter).
+function marketsForView(viewName) {
+  if (viewName === 'LOS ANGELES') return ['LOS ANGELES'];
+  if (viewName === 'CHICAGO_MIL') return ['CHICAGO', 'MILWAUKEE'];
+  if (viewName === 'SACRAMENTO')  return ['SACRAMENTO'];
+  if (viewName === 'NY_NJ')       return NY_NJ_MARKETS;
+  return null;
+}
 
 // ZIP layer state — Day 1B
 let ZIP_LAYER_DATA = null; // raw GeoJSON FeatureCollection, loaded once
@@ -890,15 +920,7 @@ function showView(viewName) {
   const view = MARKET_VIEWS[viewName] || MARKET_VIEWS['ALL'];
   if (view) map.setView(view.center, view.zoom);
 
-  if (viewName === 'LOS ANGELES') {
-    drawOverlaysForMarkets(['LOS ANGELES']);
-  } else if (viewName === 'CHICAGO_MIL') {
-    drawOverlaysForMarkets(['CHICAGO', 'MILWAUKEE']);
-  } else if (viewName === 'SACRAMENTO') {
-    drawOverlaysForMarkets(['SACRAMENTO']);
-  } else {
-    drawOverlaysForMarkets(['LOS ANGELES', 'CHICAGO', 'MILWAUKEE', 'SACRAMENTO']);
-  }
+  drawOverlaysForMarkets(marketsForView(viewName) || ALL_MARKETS);
 
   applyFiltersAndRender();
 }
@@ -908,16 +930,10 @@ function showView(viewName) {
 // user toggles a pill or types in the search box.
 function applyFiltersAndRender() {
   // 1. Market scope: which rows are eligible based on the active market button.
-  let scope;
-  if (CURRENT_VIEW === 'LOS ANGELES') {
-    scope = ADDRESSES.filter(a => a.market === 'LOS ANGELES');
-  } else if (CURRENT_VIEW === 'CHICAGO_MIL') {
-    scope = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE');
-  } else if (CURRENT_VIEW === 'SACRAMENTO') {
-    scope = ADDRESSES.filter(a => a.market === 'SACRAMENTO');
-  } else {
-    scope = ADDRESSES;
-  }
+  const scopeMarkets = marketsForView(CURRENT_VIEW);
+  const scope = scopeMarkets
+    ? ADDRESSES.filter(a => scopeMarkets.includes(a.market))
+    : ADDRESSES;
 
   // 2. User filters: managers, carriers, search box.
   const toShow = scope.filter(rowMatchesFilters);
@@ -1114,7 +1130,8 @@ function updateZoneList(addrs) {
   const chiIds = knownIds.filter(id => ZONES[id].market === 'CHICAGO');
   const milIds = knownIds.filter(id => ZONES[id].market === 'MILWAUKEE');
   const sacIds = knownIds.filter(id => ZONES[id].market === 'SACRAMENTO');
-  const orderedIds = [...laIds, ...chiIds, ...milIds, ...sacIds];
+  const nynjIds = knownIds.filter(id => NY_NJ_MARKETS.includes(ZONES[id].market));
+  const orderedIds = [...laIds, ...chiIds, ...milIds, ...sacIds, ...nynjIds];
 
   const list = document.getElementById('zoneList');
   list.innerHTML = '';
@@ -1158,6 +1175,8 @@ function renderZoneStructure() {
   if (byMarket['CHICAGO'])     lines.push(`<div>• <b>Chicago:</b> ${byMarket['CHICAGO']} zones</div>`);
   if (byMarket['MILWAUKEE'])   lines.push(`<div>• <b>Milwaukee + N. IL:</b> ${byMarket['MILWAUKEE']} zone${byMarket['MILWAUKEE']>1?'s':''}</div>`);
   if (byMarket['SACRAMENTO'])  lines.push(`<div>• <b>Sacramento:</b> ${byMarket['SACRAMENTO']} zone${byMarket['SACRAMENTO']>1?'s':''}</div>`);
+  const nynjZones = NY_NJ_MARKETS.reduce((n, m) => n + (byMarket[m] || 0), 0);
+  if (nynjZones) lines.push(`<div>• <b>New York + New Jersey:</b> ${nynjZones} zone${nynjZones>1?'s':''}</div>`);
   lines.push(`<div style="margin-top:6px"><b>${total} managers total</b></div>`);
 
   document.getElementById('zoneStructure').innerHTML = lines.join('');
@@ -1193,10 +1212,12 @@ function updateMarketCounts() {
   const la = ADDRESSES.filter(a => a.market === 'LOS ANGELES').length;
   const cm = ADDRESSES.filter(a => a.market === 'CHICAGO' || a.market === 'MILWAUKEE').length;
   const sac = ADDRESSES.filter(a => a.market === 'SACRAMENTO').length;
+  const nynj = ADDRESSES.filter(a => NY_NJ_MARKETS.includes(a.market)).length;
   document.querySelector('[data-count="ALL"]').textContent = all.toLocaleString();
   document.querySelector('[data-count="LOS ANGELES"]').textContent = la.toLocaleString();
   document.querySelector('[data-count="CHICAGO_MIL"]').textContent = cm.toLocaleString();
   document.querySelector('[data-count="SACRAMENTO"]').textContent = sac.toLocaleString();
+  document.querySelector('[data-count="NY_NJ"]').textContent = nynj.toLocaleString();
 }
 
 // ============================================================================
@@ -1206,7 +1227,7 @@ function buildFilterControls() {
   // ---- Manager pills, ordered like the zone list (LA, Chicago, Milwaukee, Sacramento) ----
   const managerEntries = [];
   const seen = new Set();
-  const ordered = ['LOS ANGELES', 'CHICAGO', 'MILWAUKEE', 'SACRAMENTO'];
+  const ordered = ALL_MARKETS;
   ordered.forEach(market => {
     Object.values(ZONES).forEach(z => {
       if (z.market !== market) return;
@@ -1480,11 +1501,7 @@ function getInScopeZips() {
   }
 
   // Determine which markets are in scope
-  let marketScope = null;
-  if (CURRENT_VIEW === 'LOS ANGELES') marketScope = ['LOS ANGELES'];
-  else if (CURRENT_VIEW === 'CHICAGO_MIL') marketScope = ['CHICAGO', 'MILWAUKEE'];
-  else if (CURRENT_VIEW === 'SACRAMENTO') marketScope = ['SACRAMENTO'];
-  // else null = no market filter (ALL view)
+  const marketScope = marketsForView(CURRENT_VIEW);  // null = no filter (ALL view)
 
   const result = [];
   for (const feat of features) {
@@ -1508,6 +1525,7 @@ function describeScope() {
   if (CURRENT_VIEW === 'LOS ANGELES') parts.push('Los Angeles');
   else if (CURRENT_VIEW === 'CHICAGO_MIL') parts.push('Chicago + Milwaukee');
   else if (CURRENT_VIEW === 'SACRAMENTO') parts.push('Sacramento');
+  else if (CURRENT_VIEW === 'NY_NJ') parts.push('New York + New Jersey');
   else parts.push('all markets');
 
   if (FILTERS.managers.size > 0) {
@@ -1666,9 +1684,22 @@ function assignZoneForZip(zipProps, centroidLatLng) {
     'Chicago, IL':     'CHICAGO',
     'Milwaukee, WI':   'MILWAUKEE',
     'Sacramento, CA':  'SACRAMENTO',
+    // New York + New Jersey — 11 DMAs, all rendered under the one NY/NJ button.
+    'New York, NY':                    'NEW YORK',
+    'Philadelphia, PA':                'PHILADELPHIA',
+    'Buffalo, NY':                     'BUFFALO',
+    'Rochester, NY':                   'ROCHESTER',
+    'Albany-Schenectady-Troy, NY':     'ALBANY-SCHENECTADY-TROY',
+    'Syracuse, NY':                    'SYRACUSE',
+    'Utica, NY':                       'UTICA',
+    'Binghamton, NY':                  'BINGHAMTON',
+    'Watertown, NY':                   'WATERTOWN',
+    'Elmira (Corning), NY':            'ELMIRA (CORNING)',
+    'Burlington-Plattsburgh, VT-NY':   'BURLINGTON-PLATTSBURGH',
   };
   const market = marketNameToMarket[zipProps.market_name] || null;
-  const stateFull = { CA: 'California', IL: 'Illinois', IN: 'Indiana', WI: 'Wisconsin' }[zipProps.state] || zipProps.state;
+  const stateFull = { CA: 'California', IL: 'Illinois', IN: 'Indiana', WI: 'Wisconsin',
+                      NY: 'New York', NJ: 'New Jersey' }[zipProps.state] || zipProps.state;
 
   for (const rule of ASSIGNMENT_RULES) {
     const m = rule.match || {};
