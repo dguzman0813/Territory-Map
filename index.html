@@ -941,22 +941,27 @@ function showView(viewName) {
 // Called by showView() after a market change, and by filter handlers when the
 // user toggles a pill or types in the search box.
 function applyFiltersAndRender() {
-  // 1. Market scope: which rows are eligible based on the active market button.
-  const scopeMarkets = marketsForView(CURRENT_VIEW);
-  const scope = scopeMarkets
-    ? ADDRESSES.filter(a => scopeMarkets.includes(a.market))
-    : ADDRESSES;
+  // 1. User filters: managers, carriers, contact status, opportunity, pipeline,
+  //    data filter. These apply everywhere and are NOT market-scoped.
+  const toShow = ADDRESSES.filter(rowMatchesFilters);
 
-  // 2. User filters: managers, carriers, search box.
-  const toShow = scope.filter(rowMatchesFilters);
+  // 2. Market scope. The market button is a CAMERA MOVE, not a pin filter: every
+  //    matching pin is drawn regardless of market, so the user can zoom out and
+  //    scroll to a neighboring market without pins disappearing. The SIDEBAR
+  //    stays scoped to the clicked market, so "Los Angeles" still reports LA's
+  //    counts and zone breakdown.
+  const scopeMarkets = marketsForView(CURRENT_VIEW);  // null = ALL view (no scope)
+  const inScope = scopeMarkets
+    ? toShow.filter(a => scopeMarkets.includes(a.market))
+    : toShow;
 
   markerLayer.clearLayers();
-  drawMarkers(toShow);
-  updateZoneList(toShow);
-  updateStats(toShow);
+  drawMarkers(toShow);      // map: every market
+  updateZoneList(inScope);  // sidebar: clicked market only
+  updateStats(inScope);     // sidebar: clicked market only
   updateMarketCounts();
   updateClearLink();
-  // Day 2: demographics panel reflects market + manager scope
+  // Day 2: demographics panel reflects market + manager scope (via getInScopeZips)
   renderDemographicsPanel();
 }
 
