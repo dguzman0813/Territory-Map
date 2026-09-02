@@ -432,6 +432,57 @@
      confusing visual noise that doesn't help users navigate the map. */
   .leaflet-interactive:focus { outline: none; }
   path.leaflet-interactive:focus { outline: none; }
+
+  /* ---- Radius search + Campaign (v1.19, 2026-09-02) --------------------- */
+  .rs-block {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .rs-block h3 {
+    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: #6b7280; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .rs-block .clear-link {
+    font-size: 11px; font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: #2563eb; cursor: pointer;
+  }
+  .rs-block .clear-link:hover { text-decoration: underline; }
+  .rs-block .clear-link.disabled { color: #d1d5db; cursor: default; text-decoration: none; }
+  .rs-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .rs-mi {
+    font: inherit; font-size: 11px; padding: 3px 9px; cursor: pointer;
+    border: 1px solid #d1d5db; border-radius: 100px; background: white; color: #374151;
+  }
+  .rs-mi.on { background: #eab308; border-color: #a16207; color: #1f2937; font-weight: 600; }
+  .rs-place {
+    font: inherit; font-size: 11px; font-weight: 600; padding: 5px 10px; cursor: pointer;
+    border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #374151;
+    margin-top: 8px; width: 100%;
+  }
+  .rs-place.on { background: #eab308; border-color: #a16207; color: #1f2937; }
+  .rs-status { margin-top: 8px; font-size: 11px; color: #6b7280; line-height: 1.5; }
+  .rs-status strong { color: #111827; font-size: 14px; }
+  .rs-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .rs-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 10px;
+    background: white; border: 1px solid #e5e7eb; border-radius: 100px; padding: 1px 7px;
+    color: #374151;
+  }
+  .rs-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .rs-coords { margin-top: 4px; font-size: 10px; color: #9ca3af; }
+  #map.rs-placing, #map.rs-placing .leaflet-grab,
+  #map.rs-placing .leaflet-interactive { cursor: crosshair !important; }
+  .pop-rs-link {
+    display: inline-block; margin-top: 6px; font-size: 11px; color: #a16207;
+    cursor: pointer; text-decoration: underline;
+  }
+  .camp-note { margin-top: 6px; font-size: 10px; color: #6b7280; line-height: 1.5; }
+  .camp-note strong { color: #111827; }
+  .camp-key { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+  .camp-key-pin { border-radius: 50%; background: #6b7280; display: inline-block; }
+  .camp-key-pin.big { width: 11px; height: 11px; }
+  .camp-key-pin.small { width: 7px; height: 7px; opacity: .5; }
 </style>
 </head>
 <body>
@@ -507,6 +558,12 @@
         <div class="filter-block-label">Pipeline</div>
         <div class="pill-group" id="filterPipelines"></div>
       </div>
+
+      <div class="filter-block">
+        <div class="filter-block-label">Campaign</div>
+        <div class="pill-group" id="filterCampaigns"></div>
+        <div class="camp-note" id="campaignNote"></div>
+      </div>
     </div>
 
     <div class="layers-block">
@@ -548,6 +605,21 @@
         </div>
       </div>
       <div class="datafilter-status" id="dataFilterStatus"></div>
+    </div>
+
+    <div class="rs-block">
+      <h3>
+        Radius search
+        <a class="clear-link disabled" id="clearRadius">Clear</a>
+      </h3>
+      <div class="rs-row" id="radiusMiles">
+        <button type="button" class="rs-mi on" data-mi="1">1 mi</button>
+        <button type="button" class="rs-mi" data-mi="2">2 mi</button>
+        <button type="button" class="rs-mi" data-mi="5">5 mi</button>
+        <button type="button" class="rs-mi" data-mi="10">10 mi</button>
+      </div>
+      <button type="button" class="rs-place" id="radiusPlace">Place ring on map</button>
+      <div class="rs-status" id="radiusStatus">No ring placed.</div>
     </div>
 
     <div class="demographics-block" id="demographicsBlock">
@@ -912,6 +984,7 @@ function parseCsv(csvText) {
       secondary_phone:(row.secondary_phone|| '').trim(),
       opportunity_level: (row.opportunity_level || '').trim(),
       pipeline:       (row.pipeline       || '').trim(),
+      campaign:       (row.campaign       || '').trim(),   // v1.19 campaign tag
       deal_stage:     (row.deal_stage     || '').trim(),
       geocode_status: (row.geocode_status || '').trim(),
       zone_id:        (row.zone_id        || '').trim(),
@@ -963,6 +1036,11 @@ function applyFiltersAndRender() {
   updateClearLink();
   // Day 2: demographics panel reflects market + manager scope (via getInScopeZips)
   renderDemographicsPanel();
+  // v1.19: remember what is on screen so the radius count and the campaign
+  // note can be recomputed without re-running the filter chain.
+  RADIUS_LAST = toShow;
+  updateRadiusStatus();
+  updateCampaignNote();
 }
 
 function rowMatchesFilters(a) {
@@ -973,6 +1051,8 @@ function rowMatchesFilters(a) {
   if (FILTERS.worked.size > 0 && !FILTERS.worked.has(workedStatus(a))) return false;
   if (FILTERS.opportunities.size > 0 && !FILTERS.opportunities.has(a.opportunity_level)) return false;
   if (FILTERS.pipelines.size > 0 && !FILTERS.pipelines.has(a.pipeline)) return false;
+  // v1.19: an active campaign narrows the map to the ZIPs that make up its area.
+  if (campaignActive() && !inCampaignArea(a)) return false;
   // Day 2+: hide pins on ZIPs that don't match the active data filter.
   // If no filter is active, zipMatchesDataFilter always returns true.
   if (isDataFilterActive() && !zipMatchesDataFilter(a.zip)) return false;
@@ -1065,12 +1145,21 @@ function drawMarkers(addrs) {
 
     const color = pinColor(a);  // green = Cricket, blue = Non-Wireless Investor
 
+    // v1.19 — three independent visual channels, so they never fight:
+    //   fill color  = carrier (unchanged)
+    //   size        = on the active campaign's lead list, vs already on the map
+    //   gold stroke = inside the radius-search ring
+    const onList  = onCampaignList(a);
+    const inRing  = radiusActive() && insideRadius(a);
+    const outRing = radiusActive() && !inRing;
+
     const marker = L.circleMarker([lat, lng], {
-      radius: 4,
+      radius: inRing ? (onList ? 7 : 6) : (onList ? 6 : 4),
       fillColor: color,
-      color: 'white',
-      weight: 1,
-      fillOpacity: 0.85,
+      color: inRing ? '#eab308' : 'white',
+      weight: inRing ? 3 : (onList ? 2 : 1),
+      fillOpacity: outRing ? 0.25 : (campaignActive() && !onList ? 0.5 : 0.9),
+      opacity: outRing ? 0.35 : 1,
     });
 
     marker.bindPopup(buildPopup(a));
@@ -1118,9 +1207,15 @@ function buildPopup(a) {
   const wk = workedStatus(a);
   if (wk)                  tags.push(`<span class="pop-tag">${escapeHtml(wk)}</span>`);
   if (a.pipeline)          tags.push(`<span class="pop-tag">Pipeline: ${escapeHtml(a.pipeline)}</span>`);
+  if (a.campaign)          tags.push(`<span class="pop-tag">Campaign: ${escapeHtml(a.campaign)}</span>`);
   if (a.deal_stage)        tags.push(`<span class="pop-tag">Stage: ${escapeHtml(a.deal_stage)}</span>`);
   tags.push(`<span class="popup-zone" style="background:${zoneColor}">${escapeHtml(zoneLabel)}</span>`);
   out.push(`<div class="pop-meta-row">${tags.join('')}</div>`);
+
+  // v1.19: center the radius search on this store instead of hunting for it
+  // on the map. Coordinates are inlined because the popup is an HTML string.
+  out.push(`<span class="pop-rs-link" onclick="radiusFromPoint(${a.lat}, ${a.lng})">`
+    + `Radius from here</span>`);
 
   return out.join('');
 }
@@ -1375,6 +1470,11 @@ function clearAllFilters() {
   FILTERS.worked.clear();
   FILTERS.opportunities.clear();
   FILTERS.pipelines.clear();
+  if (typeof ACTIVE_CAMPAIGN !== 'undefined' && ACTIVE_CAMPAIGN != null) {
+    ACTIVE_CAMPAIGN = null;
+    CAMPAIGN_ZIPS = new Set();
+    if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+  }
   document.getElementById('filterSearch').value = '';
   clearSearchResult();
   document.querySelectorAll('.pill.on').forEach(p => {
@@ -1391,7 +1491,8 @@ function updateClearLink() {
     FILTERS.carriers.size > 0 ||
     FILTERS.worked.size > 0 ||
     FILTERS.opportunities.size > 0 ||
-    FILTERS.pipelines.size > 0;
+    FILTERS.pipelines.size > 0 ||
+    (typeof ACTIVE_CAMPAIGN !== 'undefined' && ACTIVE_CAMPAIGN != null);
   link.classList.toggle('disabled', !anyActive);
 }
 
@@ -1790,6 +1891,26 @@ function styleZipFeature(feat) {
   const zone = zoneId ? ZONES[zoneId] : null;
   const unassignedStyle = { ...baseStyle, fillOpacity: 0.05, fillColor: '#d1d5db', color: '#9ca3af' };
 
+  // v1.19 Campaign shading. Runs BEFORE the data filter so an active campaign
+  // always defines the shape on screen; inside the area the data filter still
+  // works normally, so demographics can narrow the blitz further.
+  if (campaignActive()) {
+    const cc = (CAMPAIGNS[ACTIVE_CAMPAIGN] && CAMPAIGNS[ACTIVE_CAMPAIGN].color) || '#f59e0b';
+    if (!CAMPAIGN_ZIPS.has(zip5(feat.properties.zip))) {
+      // Outside the campaign area: recede to a faint grey wash.
+      return { weight: 0.3, color: '#d1d5db', fillColor: '#d1d5db', fillOpacity: 0.04 };
+    }
+    if (isDataFilterActive() && !zipMatchesDataFilter(feat.properties.zip)) {
+      // In the area but filtered out: keep the campaign hue, much lighter.
+      return { weight: 0.5, color: cc, fillColor: cc, fillOpacity: 0.06 };
+    }
+    if (isDataFilterActive()) {
+      // In the area AND a data-filter match: campaign fill, gold ring on top.
+      return { weight: 2.5, color: '#eab308', fillColor: cc, fillOpacity: 0.34 };
+    }
+    return { weight: 1.1, color: '#d97706', fillColor: cc, fillOpacity: 0.22 };
+  }
+
   // Data filter handling — gold ring for matches, dim grey for non-matches.
   // The filter is checked only when active; otherwise normal zone coloring.
   if (isDataFilterActive()) {
@@ -1870,6 +1991,10 @@ function renderZipLayer() {
   // Re-add pins + zone overlays so they paint above the ZIP layer.
   if (map.hasLayer(zoneLayer)) { map.removeLayer(zoneLayer); zoneLayer.addTo(map); }
   if (map.hasLayer(markerLayer)) { map.removeLayer(markerLayer); markerLayer.addTo(map); }
+  // v1.19: keep the radius ring above the freshly added ZIP layer.
+  if (typeof radiusLayer !== 'undefined' && map.hasLayer(radiusLayer)) {
+    map.removeLayer(radiusLayer); radiusLayer.addTo(map);
+  }
 }
 
 function setZipLayerVisible(visible) {
@@ -2089,6 +2214,293 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
   // Initial state
   setInputsEnabled();
 })();
+
+// ============================================================================
+// RADIUS SEARCH — v1.19 (2026-09-02)
+// Drop a ring on a corridor (E Fordham Rd, 86th St) and the sidebar reports how
+// many doors fall inside. HIGHLIGHT, not filter: pins inside get a gold outline,
+// pins outside fade but stay on the map so the rep keeps the surrounding context.
+//
+// Placed by CLICKING — the map, or "Radius from here" in a pin popup. There is
+// deliberately no address box: geocoding needs an API key and this file is served
+// publicly from GitHub Pages, so a key cannot live here.
+// ============================================================================
+const RADIUS = { lat: null, lng: null, miles: 1, placing: false };
+const radiusLayer = L.layerGroup().addTo(map);
+let RADIUS_LAST = [];                   // last filtered set drawn, for the count
+const MILES_TO_METERS = 1609.344;
+
+function radiusActive() { return RADIUS.lat != null && RADIUS.lng != null; }
+
+// Great-circle distance in miles. Straight-line, not driving distance.
+function milesBetween(lat1, lng1, lat2, lng2) {
+  const R = 3958.7613;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function insideRadius(a) {
+  if (!radiusActive()) return false;
+  return milesBetween(RADIUS.lat, RADIUS.lng, a.lat, a.lng) <= RADIUS.miles;
+}
+
+function drawRadius() {
+  radiusLayer.clearLayers();
+  if (!radiusActive()) return;
+  L.circle([RADIUS.lat, RADIUS.lng], {
+    radius: RADIUS.miles * MILES_TO_METERS,
+    color: '#eab308', weight: 2, dashArray: '5,4',
+    fillColor: '#eab308', fillOpacity: 0.06,
+    interactive: false,   // never swallow a click meant for a pin or the map
+  }).addTo(radiusLayer);
+  L.circleMarker([RADIUS.lat, RADIUS.lng], {
+    radius: 4, color: '#a16207', weight: 2,
+    fillColor: '#eab308', fillOpacity: 1, interactive: false,
+  }).addTo(radiusLayer);
+  if (map.hasLayer(radiusLayer)) { map.removeLayer(radiusLayer); radiusLayer.addTo(map); }
+}
+
+// Called from the map click handler and from the pin popup link.
+function radiusFromPoint(lat, lng) {
+  RADIUS.lat = lat;
+  RADIUS.lng = lng;
+  setRadiusPlacing(false);
+  map.closePopup();
+  drawRadius();
+  applyFiltersAndRender();
+}
+
+function clearRadius() {
+  RADIUS.lat = null;
+  RADIUS.lng = null;
+  setRadiusPlacing(false);
+  drawRadius();
+  applyFiltersAndRender();
+}
+
+function setRadiusPlacing(on) {
+  RADIUS.placing = !!on;
+  const btn = document.getElementById('radiusPlace');
+  const mapEl = document.getElementById('map');
+  if (btn) {
+    btn.classList.toggle('on', RADIUS.placing);
+    btn.textContent = RADIUS.placing ? 'Click the map…' : 'Place ring on map';
+  }
+  if (mapEl) mapEl.classList.toggle('rs-placing', RADIUS.placing);
+}
+
+// Counts respect the active Campaign / Carrier / Manager filters — the number
+// reported is what the rep can actually see on screen.
+function updateRadiusStatus() {
+  const el  = document.getElementById('radiusStatus');
+  const clr = document.getElementById('clearRadius');
+  if (!el) return;
+
+  if (!radiusActive()) {
+    el.innerHTML = RADIUS.placing
+      ? '<em>Click anywhere on the map to drop the ring.</em>'
+      : 'No ring placed. Pick a radius, then Place ring on map.';
+    if (clr) clr.classList.add('disabled');
+    return;
+  }
+
+  const inside = RADIUS_LAST.filter(insideRadius);
+  const byIndustry = {};
+  inside.forEach(a => {
+    const k = a.industry || 'Unknown';
+    byIndustry[k] = (byIndustry[k] || 0) + 1;
+  });
+  const chips = Object.keys(byIndustry)
+    .sort((x, y) => byIndustry[y] - byIndustry[x])
+    .map(k => `<span class="rs-chip"><span class="rs-dot" style="background:`
+             + `${pinColor({ industry: k })}"></span>${escapeHtml(k)} ${byIndustry[k]}</span>`);
+
+  el.innerHTML =
+    `<strong>${inside.length.toLocaleString()}</strong> door${inside.length === 1 ? '' : 's'} `
+    + `inside the ${RADIUS.miles} mi ring`
+    + `<div class="rs-chips">${chips.join('')}</div>`
+    + `<div class="rs-coords">center ${RADIUS.lat.toFixed(5)}, ${RADIUS.lng.toFixed(5)}`
+    + ` &middot; straight-line radius</div>`;
+  if (clr) clr.classList.remove('disabled');
+}
+
+(function wireRadius() {
+  document.querySelectorAll('#radiusMiles .rs-mi').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#radiusMiles .rs-mi')
+        .forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      RADIUS.miles = parseFloat(btn.dataset.mi);
+      drawRadius();
+      if (radiusActive()) applyFiltersAndRender(); else updateRadiusStatus();
+    });
+  });
+
+  const place = document.getElementById('radiusPlace');
+  if (place) place.addEventListener('click', () => {
+    setRadiusPlacing(!RADIUS.placing);
+    updateRadiusStatus();
+  });
+
+  const clr = document.getElementById('clearRadius');
+  if (clr) clr.addEventListener('click', () => {
+    if (!clr.classList.contains('disabled')) clearRadius();
+  });
+
+  // ZIP polygons bind only tooltips and hover, and nothing calls
+  // stopPropagation, so a click over a ZIP still reaches the map.
+  map.on('click', e => {
+    if (RADIUS.placing) radiusFromPoint(e.latlng.lat, e.latlng.lng);
+  });
+
+  // Esc backs out of placing mode without dropping a ring.
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && RADIUS.placing) { setRadiusPlacing(false); updateRadiusStatus(); }
+  });
+})();
+
+// ============================================================================
+// CAMPAIGNS — v1.19 (2026-09-02)
+// A campaign is a temporary field push (a blitz, a sweep, a promo). It is NOT a
+// zone: zones are the ownership record and get re-stamped onto every row nightly
+// by the Apps Script, so using one for a one-week event would rewrite ownership
+// and have to be unwound afterwards.
+//
+// Definitions live in campaigns.json (read only by this file — no Drive copy, the
+// Apps Script does not use it). Each campaign carries the ZIPs that form its
+// area: a pin inside one of those ZIPs belongs to the campaign area.
+//
+// Selecting a campaign pill:
+//   - filters pins to that campaign's ZIPs
+//   - shades those ZIPs in the campaign color
+//   - draws doors from the campaign's own lead list (the `campaign` column in
+//     the Sheet) LARGER than the doors the map already had in the same ZIPs
+//   - zooms to the campaign area
+// One campaign at a time; clicking the active pill turns it off.
+// ============================================================================
+const CAMPAIGNS_URL = 'campaigns.json';
+let CAMPAIGNS = {};
+let ACTIVE_CAMPAIGN = null;          // key into CAMPAIGNS, or null
+let CAMPAIGN_ZIPS = new Set();       // ZIPs of the active campaign
+
+// Sheet ZIPs can arrive unpadded (a NJ 07024 stored as a number reads "7024"),
+// so every comparison goes through this.
+function zip5(z) {
+  const d = String(z == null ? '' : z).replace(/\D/g, '');
+  return d ? d.slice(0, 5).padStart(5, '0') : '';
+}
+
+function campaignActive() { return ACTIVE_CAMPAIGN != null; }
+function inCampaignArea(a) { return campaignActive() && CAMPAIGN_ZIPS.has(zip5(a.zip)); }
+// True only for rows that came from the campaign's own lead list.
+function onCampaignList(a) {
+  return campaignActive() && (a.campaign || '').trim() === ACTIVE_CAMPAIGN;
+}
+
+async function loadCampaigns() {
+  try {
+    const resp = await fetch(CAMPAIGNS_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    CAMPAIGNS = data.campaigns || {};
+  } catch (err) {
+    // Non-fatal by design: no campaigns.json just means no Campaign pills.
+    console.warn('campaigns.json not loaded —', err.message);
+    CAMPAIGNS = {};
+  }
+  buildCampaignPills();
+}
+
+function buildCampaignPills() {
+  const el = document.getElementById('filterCampaigns');
+  if (!el) return;
+  const keys = Object.keys(CAMPAIGNS);
+  el.innerHTML = '';
+  if (!keys.length) {
+    el.innerHTML = '<div style="font-size:11px; color:#9ca3af; font-style:italic">None defined</div>';
+    updateCampaignNote();
+    return;
+  }
+  keys.forEach(key => {
+    const c = CAMPAIGNS[key];
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'pill';
+    pill.dataset.kind = 'campaigns';
+    pill.dataset.value = key;
+    pill.innerHTML =
+      `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;`
+      + `background:${c.color || '#f59e0b'};margin-right:6px;vertical-align:middle"></span>`
+      + escapeHtml(c.label || key);
+    pill.title = c.description || '';
+    pill.addEventListener('click', () => setCampaign(campaignActive() && ACTIVE_CAMPAIGN === key ? null : key));
+    el.appendChild(pill);
+  });
+  updateCampaignNote();
+}
+
+function setCampaign(key) {
+  ACTIVE_CAMPAIGN = key;
+  const c = key ? CAMPAIGNS[key] : null;
+  CAMPAIGN_ZIPS = new Set((c && c.zips ? c.zips : []).map(zip5));
+
+  document.querySelectorAll('#filterCampaigns .pill').forEach(p => {
+    const on = p.dataset.value === key;
+    p.classList.toggle('on', on);
+    p.style.background = on ? (c && c.color ? c.color : '#f59e0b') : '';
+  });
+
+  // Reshade the ZIP polygons for the new campaign, then redraw pins/counts.
+  if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+  applyFiltersAndRender();
+  if (key) zoomToCampaign();
+}
+
+// Fit the map to the campaign's ZIP polygons. Falls back to the campaign's pins
+// when the ZIP layer is hidden or a ZIP has no ZCTA polygon (PO-box-only ZIPs).
+function zoomToCampaign() {
+  let bounds = null;
+  if (ZIP_LAYER_GROUP) {
+    ZIP_LAYER_GROUP.eachLayer(l => {
+      const p = l.feature && l.feature.properties;
+      if (p && CAMPAIGN_ZIPS.has(zip5(p.zip))) {
+        bounds = bounds ? bounds.extend(l.getBounds()) : l.getBounds();
+      }
+    });
+  }
+  if (!bounds) {
+    const pts = ADDRESSES.filter(inCampaignArea).map(a => [a.lat, a.lng]);
+    if (pts.length) bounds = L.latLngBounds(pts);
+  }
+  if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
+}
+
+function updateCampaignNote() {
+  const el = document.getElementById('campaignNote');
+  if (!el) return;
+  if (!campaignActive()) {
+    el.innerHTML = Object.keys(CAMPAIGNS).length
+      ? 'Off — every door in scope is shown.'
+      : '';
+    return;
+  }
+  const c = CAMPAIGNS[ACTIVE_CAMPAIGN] || {};
+  const inArea = ADDRESSES.filter(inCampaignArea);
+  const onList = inArea.filter(onCampaignList).length;
+  el.innerHTML =
+    `<strong>${inArea.length.toLocaleString()}</strong> doors in `
+    + `${CAMPAIGN_ZIPS.size} ZIPs`
+    + `<div class="camp-key"><span class="camp-key-pin big"></span>`
+    + `<span><strong>${onList.toLocaleString()}</strong> from the campaign list</span></div>`
+    + `<div class="camp-key"><span class="camp-key-pin small"></span>`
+    + `<span>${(inArea.length - onList).toLocaleString()} already on the map in the same ZIPs</span></div>`;
+}
+
+loadCampaigns();
 
 loadAll();
 </script>
