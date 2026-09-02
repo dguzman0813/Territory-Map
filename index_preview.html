@@ -432,6 +432,51 @@
      confusing visual noise that doesn't help users navigate the map. */
   .leaflet-interactive:focus { outline: none; }
   path.leaflet-interactive:focus { outline: none; }
+
+  /* ---- Blitz ring (v1.19) ------------------------------------------------ */
+  .ring-block {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .ring-block h3 {
+    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: #6b7280; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .ring-block .clear-link {
+    font-size: 11px; font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: #2563eb; cursor: pointer;
+  }
+  .ring-block .clear-link:hover { text-decoration: underline; }
+  .ring-block .clear-link.disabled { color: #d1d5db; cursor: default; text-decoration: none; }
+  .ring-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .ring-mi {
+    font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
+    border: 1px solid #d1d5db; border-radius: 100px; background: white; color: #374151;
+  }
+  .ring-mi.on { background: #eab308; border-color: #a16207; color: #1f2937; font-weight: 600; }
+  .ring-place {
+    font: inherit; font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer;
+    border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #374151;
+    margin-top: 8px; width: 100%;
+  }
+  .ring-place.on { background: #eab308; border-color: #a16207; color: #1f2937; }
+  .ring-status { margin-top: 8px; font-size: 11px; color: #6b7280; line-height: 1.5; }
+  .ring-status strong { color: #111827; font-size: 14px; }
+  .ring-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .ring-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 10px;
+    background: white; border: 1px solid #e5e7eb; border-radius: 100px; padding: 1px 7px;
+    color: #374151;
+  }
+  .ring-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .ring-coords { margin-top: 4px; font-size: 10px; color: #9ca3af; }
+  #map.ring-placing, #map.ring-placing .leaflet-grab,
+  #map.ring-placing .leaflet-interactive { cursor: crosshair !important; }
+  .pop-ring-link {
+    display: inline-block; margin-top: 6px; font-size: 11px; color: #a16207;
+    cursor: pointer; text-decoration: underline;
+  }
 </style>
 </head>
 <body>
@@ -548,6 +593,21 @@
         </div>
       </div>
       <div class="datafilter-status" id="dataFilterStatus"></div>
+    </div>
+
+    <div class="ring-block">
+      <h3>
+        Blitz ring
+        <a class="clear-link disabled" id="clearRing">Clear</a>
+      </h3>
+      <div class="ring-row" id="ringRadius">
+        <button type="button" class="ring-mi" data-mi="0.25">&frac14; mi</button>
+        <button type="button" class="ring-mi" data-mi="0.5">&frac12; mi</button>
+        <button type="button" class="ring-mi on" data-mi="1">1 mi</button>
+        <button type="button" class="ring-mi" data-mi="2">2 mi</button>
+      </div>
+      <button type="button" class="ring-place" id="ringPlace">Place ring on map</button>
+      <div class="ring-status" id="ringStatus">No ring placed.</div>
     </div>
 
     <div class="demographics-block" id="demographicsBlock">
@@ -963,6 +1023,10 @@ function applyFiltersAndRender() {
   updateClearLink();
   // Day 2: demographics panel reflects market + manager scope (via getInScopeZips)
   renderDemographicsPanel();
+  // Blitz ring (v1.19): remember what is on screen so the ring count can be
+  // recomputed without re-running the filter chain.
+  RING_LAST = toShow;
+  updateRingStatus();
 }
 
 function rowMatchesFilters(a) {
@@ -1065,12 +1129,19 @@ function drawMarkers(addrs) {
 
     const color = pinColor(a);  // green = Cricket, blue = Non-Wireless Investor
 
+    // Blitz ring (v1.19): doors inside the ring get a gold outline and sit
+    // slightly larger; doors outside stay on the map but fade back, so the rep
+    // keeps the surrounding context. No ring = original styling for every pin.
+    const inRing  = ringActive() && insideRing(a);
+    const outRing = ringActive() && !inRing;
+
     const marker = L.circleMarker([lat, lng], {
-      radius: 4,
+      radius: inRing ? 6 : 4,
       fillColor: color,
-      color: 'white',
-      weight: 1,
-      fillOpacity: 0.85,
+      color: inRing ? '#eab308' : 'white',
+      weight: inRing ? 3 : 1,
+      fillOpacity: outRing ? 0.25 : 0.85,
+      opacity: outRing ? 0.35 : 1,
     });
 
     marker.bindPopup(buildPopup(a));
@@ -1121,6 +1192,11 @@ function buildPopup(a) {
   if (a.deal_stage)        tags.push(`<span class="pop-tag">Stage: ${escapeHtml(a.deal_stage)}</span>`);
   tags.push(`<span class="popup-zone" style="background:${zoneColor}">${escapeHtml(zoneLabel)}</span>`);
   out.push(`<div class="pop-meta-row">${tags.join('')}</div>`);
+
+  // Blitz ring (v1.19): center the ring on this store without hunting for it
+  // on the map. Coordinates are inlined because the popup is an HTML string.
+  out.push(`<span class="pop-ring-link" onclick="ringFromPoint(${a.lat}, ${a.lng})">`
+    + `Ring from here</span>`);
 
   return out.join('');
 }
@@ -1870,6 +1946,10 @@ function renderZipLayer() {
   // Re-add pins + zone overlays so they paint above the ZIP layer.
   if (map.hasLayer(zoneLayer)) { map.removeLayer(zoneLayer); zoneLayer.addTo(map); }
   if (map.hasLayer(markerLayer)) { map.removeLayer(markerLayer); markerLayer.addTo(map); }
+  // Blitz ring (v1.19): keep the ring above the freshly added ZIP layer.
+  if (typeof ringLayer !== 'undefined' && map.hasLayer(ringLayer)) {
+    map.removeLayer(ringLayer); ringLayer.addTo(map);
+  }
 }
 
 function setZipLayerVisible(visible) {
@@ -2088,6 +2168,156 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
 
   // Initial state
   setInputsEnabled();
+})();
+
+// ============================================================================
+// BLITZ RING — v1.19 (2026-09-02)
+// A click-to-place radius ring for door-knock planning: drop it on a corridor
+// (E Fordham Rd, 86th St) and the sidebar reports how many doors fall inside.
+//
+// HIGHLIGHT mode, not filter mode: pins inside get a gold outline, pins outside
+// fade but stay on the map, so the rep keeps the surrounding context.
+//
+// The ring is placed by CLICKING — the map, or "Ring from here" in a pin popup.
+// There is deliberately no address box: geocoding an address needs an API key,
+// and this file is served publicly from GitHub Pages, so a key cannot live here.
+// ============================================================================
+const RING = { lat: null, lng: null, miles: 1, placing: false };
+const ringLayer = L.layerGroup().addTo(map);
+let RING_LAST = [];                 // last filtered set drawn, for the count
+const MILES_TO_METERS = 1609.344;
+
+function ringActive() { return RING.lat != null && RING.lng != null; }
+
+// Great-circle distance in miles. Straight-line, not driving distance.
+function milesBetween(lat1, lng1, lat2, lng2) {
+  const R = 3958.7613;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function insideRing(a) {
+  if (!ringActive()) return false;
+  return milesBetween(RING.lat, RING.lng, a.lat, a.lng) <= RING.miles;
+}
+
+function drawRing() {
+  ringLayer.clearLayers();
+  if (!ringActive()) return;
+  L.circle([RING.lat, RING.lng], {
+    radius: RING.miles * MILES_TO_METERS,
+    color: '#eab308', weight: 2, dashArray: '5,4',
+    fillColor: '#eab308', fillOpacity: 0.06,
+    interactive: false,   // never swallow a click meant for a pin or the map
+  }).addTo(ringLayer);
+  L.circleMarker([RING.lat, RING.lng], {
+    radius: 4, color: '#a16207', weight: 2,
+    fillColor: '#eab308', fillOpacity: 1, interactive: false,
+  }).addTo(ringLayer);
+  if (map.hasLayer(ringLayer)) { map.removeLayer(ringLayer); ringLayer.addTo(map); }
+}
+
+// Called from the map click handler and from the pin popup link.
+function ringFromPoint(lat, lng) {
+  RING.lat = lat;
+  RING.lng = lng;
+  setRingPlacing(false);
+  map.closePopup();
+  drawRing();
+  applyFiltersAndRender();
+}
+
+function clearRing() {
+  RING.lat = null;
+  RING.lng = null;
+  setRingPlacing(false);
+  drawRing();
+  applyFiltersAndRender();
+}
+
+function setRingPlacing(on) {
+  RING.placing = !!on;
+  const btn = document.getElementById('ringPlace');
+  const mapEl = document.getElementById('map');
+  if (btn) {
+    btn.classList.toggle('on', RING.placing);
+    btn.textContent = RING.placing ? 'Click the map…' : 'Place ring on map';
+  }
+  if (mapEl) mapEl.classList.toggle('ring-placing', RING.placing);
+}
+
+// Counts respect the active Carrier / Manager / Opportunity filters — the
+// number reported is what the rep can actually see on screen.
+function updateRingStatus() {
+  const el  = document.getElementById('ringStatus');
+  const clr = document.getElementById('clearRing');
+  if (!el) return;
+
+  if (!ringActive()) {
+    el.innerHTML = RING.placing
+      ? '<em>Click anywhere on the map to drop the ring.</em>'
+      : 'No ring placed. Pick a radius, then Place ring on map.';
+    if (clr) clr.classList.add('disabled');
+    return;
+  }
+
+  const inside = RING_LAST.filter(insideRing);
+  const byIndustry = {};
+  inside.forEach(a => {
+    const k = a.industry || 'Unknown';
+    byIndustry[k] = (byIndustry[k] || 0) + 1;
+  });
+  const chips = Object.keys(byIndustry)
+    .sort((x, y) => byIndustry[y] - byIndustry[x])
+    .map(k => `<span class="ring-chip"><span class="ring-dot" style="background:`
+             + `${pinColor({ industry: k })}"></span>${escapeHtml(k)} ${byIndustry[k]}</span>`);
+
+  el.innerHTML =
+    `<strong>${inside.length.toLocaleString()}</strong> door${inside.length === 1 ? '' : 's'} `
+    + `inside the ${RING.miles} mi ring`
+    + `<div class="ring-chips">${chips.join('')}</div>`
+    + `<div class="ring-coords">center ${RING.lat.toFixed(5)}, ${RING.lng.toFixed(5)}`
+    + ` &middot; straight-line radius</div>`;
+  if (clr) clr.classList.remove('disabled');
+}
+
+(function wireRing() {
+  document.querySelectorAll('#ringRadius .ring-mi').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#ringRadius .ring-mi')
+        .forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      RING.miles = parseFloat(btn.dataset.mi);
+      drawRing();
+      if (ringActive()) applyFiltersAndRender(); else updateRingStatus();
+    });
+  });
+
+  const place = document.getElementById('ringPlace');
+  if (place) place.addEventListener('click', () => {
+    setRingPlacing(!RING.placing);
+    updateRingStatus();
+  });
+
+  const clr = document.getElementById('clearRing');
+  if (clr) clr.addEventListener('click', () => {
+    if (!clr.classList.contains('disabled')) clearRing();
+  });
+
+  // ZIP polygons bind only tooltips and hover, and nothing calls
+  // stopPropagation, so a click over a ZIP still reaches the map.
+  map.on('click', e => {
+    if (RING.placing) ringFromPoint(e.latlng.lat, e.latlng.lng);
+  });
+
+  // Esc backs out of placing mode without dropping a ring.
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && RING.placing) { setRingPlacing(false); updateRingStatus(); }
+  });
 })();
 
 loadAll();
