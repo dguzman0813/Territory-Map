@@ -294,6 +294,53 @@
   .search-suggestion .addr { color: #111827; font-weight: 500; font-size: 13px; }
   .search-suggestion .meta { color: #6b7280; font-size: 11px; margin-top: 1px; }
 
+  /* ---- Map-top location search (2026-09-17) -----------------------------
+     "Find a location" moved out of the sidebar and into the stats bar so it
+     stops reading as a twin of the ZIP Lookup box. Same IDs (#filterSearch,
+     #searchSuggestions), so wireSearchTypeahead() and clearAllFilters() are
+     untouched. .stat.refresh keeps its margin-left:auto and pushes both
+     itself and this box to the right edge.
+     ---------------------------------------------------------------------- */
+  .map-search {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 320px;
+    max-width: 100%;
+    padding: 0 8px 0 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    transition: border-color .15s, background .15s, box-shadow .15s;
+  }
+  .map-search:focus-within {
+    border-color: #2563eb;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  }
+  .map-search-icon { width: 15px; height: 15px; flex: 0 0 auto; fill: #9ca3af; }
+  .map-search:focus-within .map-search-icon { fill: #2563eb; }
+  .map-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    padding: 7px 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+  .map-search-input:focus { border: none; }
+  .map-search-clear {
+    flex: 0 0 auto;
+    font: inherit; font-size: 18px; line-height: 1;
+    padding: 0 3px; margin: 0;
+    border: none; background: none; cursor: pointer; color: #9ca3af;
+  }
+  .map-search-clear:hover { color: #374151; }
+  /* Pure-CSS show/hide: the × only exists once something is typed. */
+  .map-search-input:placeholder-shown ~ .map-search-clear { display: none; }
+  .map-search .search-suggestions { left: -1px; right: -1px; margin-top: 7px; }
+
   .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
   .pill {
     display: inline-block;
@@ -387,19 +434,32 @@
   }
 
   .stats-bar {
+    /* position/z-index so the search typeahead below can paint over the map */
+    position: relative;
+    z-index: 1200;
     background: white;
-    padding: 12px 20px;
+    padding: 9px 20px;
     border-bottom: 1px solid #e5e7eb;
     display: flex;
-    gap: 24px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 24px;
     font-size: 13px;
   }
   .stat { color: #6b7280; }
   .stat strong { color: #1f2937; font-weight: 600; }
   .stat.refresh {
-    margin-left: auto;
     font-size: 12px;
     color: #9ca3af;
+  }
+  /* One auto margin, on a wrapper. Putting margin-left:auto on an item in a
+     flex-wrap container makes it swallow the whole line's free space, which
+     pushed the search box onto a second row. */
+  .stats-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
   .total-summary {
@@ -593,16 +653,6 @@
       </h3>
 
       <div class="filter-block">
-        <div class="filter-block-label">Find a location</div>
-        <div class="search-typeahead">
-          <input type="text" id="filterSearch" class="filter-search"
-                 placeholder="Start typing an address or company…"
-                 autocomplete="off">
-          <div class="search-suggestions" id="searchSuggestions"></div>
-        </div>
-      </div>
-
-      <div class="filter-block">
         <div class="filter-block-label">Account Manager</div>
         <div class="pill-group" id="filterManagers"></div>
       </div>
@@ -723,7 +773,18 @@
       <div class="stat">Manager zones: <strong id="statZones">—</strong></div>
       <div class="stat">Avg per zone: <strong id="statAvg">—</strong></div>
       <div class="stat">Range: <strong id="statRange">—</strong></div>
-      <div class="stat refresh" id="statRefresh"></div>
+      <div class="stats-right">
+        <div class="stat refresh" id="statRefresh"></div>
+        <div class="search-typeahead map-search">
+        <svg class="map-search-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 3.5a5.5 5.5 0 1 0 3.39 9.83l3.4 3.4a1 1 0 0 0 1.42-1.42l-3.4-3.4A5.5 5.5 0 0 0 9 3.5Zm0 2a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z"/></svg>
+        <input type="text" id="filterSearch" class="filter-search map-search-input"
+               placeholder="Find an address or company…"
+               autocomplete="off" aria-label="Find a location">
+        <button type="button" class="map-search-clear" id="mapSearchClear"
+                aria-label="Clear search">&times;</button>
+          <div class="search-suggestions" id="searchSuggestions"></div>
+        </div>
+      </div>
     </div>
     <div id="map"></div>
     <div class="loading-overlay" id="loading">Loading territory data…</div>
@@ -2194,6 +2255,19 @@ function showSearchResult(a) {
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-typeahead')) close();
+  });
+})();
+
+// The × inside the map-top search box. CSS hides it while the field is empty
+// (:placeholder-shown), so it only needs a click handler.
+(function wireMapSearchClear() {
+  const btn   = document.getElementById('mapSearchClear');
+  const input = document.getElementById('filterSearch');
+  if (!btn || !input) return;
+  btn.addEventListener('click', () => {
+    input.value = '';
+    clearSearchResult();
+    input.focus();
   });
 })();
 
