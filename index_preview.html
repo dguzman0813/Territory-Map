@@ -359,6 +359,14 @@
   /* Pure-CSS show/hide: the × only exists once something is typed. */
   .map-search-input:placeholder-shown ~ .map-search-clear { display: none; }
   .map-search .search-suggestions { left: -1px; right: -1px; margin-top: 9px; }
+  /* Suggestion rows: carrier dot + business name on top, address beneath. */
+  .search-suggestion .addr { display: flex; align-items: center; gap: 7px; }
+  .sg-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .search-suggestion .meta { padding-left: 15px; }
+  .search-more {
+    padding: 6px 12px; font-size: 10.5px; color: #6b7280;
+    background: #f9fafb; border-top: 1px solid #e5e7eb;
+  }
 
   .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
   .pill {
@@ -2198,41 +2206,77 @@ function showSearchResult(a) {
   const input = document.getElementById('filterSearch');
   const box   = document.getElementById('searchSuggestions');
   if (!input || !box) return;
+  const SEARCH_LIMIT = 8;   // was 3 — too few to ever find a chain store
   let matches = [];
   let activeIdx = -1;
+  let totalMatches = 0;     // how many rows matched before the cap
 
-  function close() { box.style.display = 'none'; box.innerHTML = ''; activeIdx = -1; matches = []; }
+  function close() {
+    box.style.display = 'none'; box.innerHTML = '';
+    activeIdx = -1; matches = []; totalMatches = 0;
+  }
 
+  // Business name is the headline now, address the subtitle — searching a
+  // company used to return a list of addresses, which read as "it ignored me".
+  // The dot is the carrier colour, same mapping as the pins.
   function render() {
     if (!matches.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-    box.innerHTML = matches.map((m, i) => {
-      const addr = m.address || '(no address)';
-      const meta = [m.company_name, [m.city, m.state].filter(Boolean).join(', ')]
-        .filter(Boolean).join(' · ');
+    const rows = matches.map((m, i) => {
+      const title = m.company_name || m.address || '(unnamed location)';
+      const meta  = [m.company_name ? m.address : '',
+                     [m.city, m.state].filter(Boolean).join(', '),
+                     m.zip].filter(Boolean).join(' \u00b7 ');
       return `<div class="search-suggestion${i === activeIdx ? ' active' : ''}" data-i="${i}">` +
-             `<div class="addr">${escapeHtml(addr)}</div>` +
+             `<div class="addr"><span class="sg-dot" style="background:${escapeHtml(pinColor(m))}"></span>` +
+             `${escapeHtml(title)}</div>` +
              `<div class="meta">${escapeHtml(meta)}</div></div>`;
-    }).join('');
+    });
+    if (totalMatches > matches.length) {
+      rows.push(`<div class="search-more">Showing ${matches.length} of ${totalMatches} matches` +
+                ` \u2014 keep typing to narrow</div>`);
+    }
+    box.innerHTML = rows.join('');
     box.style.display = 'block';
   }
 
-  // Match address + company, case-insensitive, across ALL rows. Cap at 3.
+  // Matches company name, address, city, state, ZIP and industry across ALL
+  // rows, then RANKS so a business-name search surfaces businesses. The old
+  // version scanned in sheet order and stopped at the first 3 hits, so typing
+  // a chain name returned three arbitrary stores and looked broken.
+  //
+  // Every token must appear somewhere in the row (AND), so "cricket long beach"
+  // narrows instead of returning nothing the way a single substring scan did.
   function compute(q) {
-    q = q.trim().toLowerCase();
     matches = [];
-    activeIdx = -1;
-    if (q.length < 2) return;
+    activeIdx = 0;
+    totalMatches = 0;
+    const raw = q.trim().toLowerCase();
+    if (raw.length < 2) { activeIdx = -1; return; }
+    const tokens = raw.split(/\s+/).filter(Boolean);
+
+    const scored = [];
     for (const a of ADDRESSES) {
-      const hay = ((a.address || '') + ' ' + (a.company_name || '')).toLowerCase();
-      if (hay.includes(q)) { matches.push(a); if (matches.length >= 3) break; }
+      const co   = (a.company_name || '').toLowerCase();
+      const rest = ((a.address || '') + ' ' + (a.city || '') + ' ' + (a.state || '') +
+                    ' ' + (a.zip || '') + ' ' + (a.industry || '')).toLowerCase();
+      const hay  = co + ' ' + rest;
+      if (!tokens.every(t => hay.includes(t))) continue;
+      totalMatches++;
+      // 0 = company name starts with what was typed, 1 = company name contains
+      // every token, 2 = only matched on address / city / ZIP / carrier.
+      const rank = co.startsWith(raw) ? 0 : (tokens.every(t => co.includes(t)) ? 1 : 2);
+      scored.push({ a, rank });
     }
-    if (matches.length) activeIdx = 0;
+    // Array.sort is stable, so rows keep sheet order inside each rank.
+    scored.sort((x, y) => x.rank - y.rank);
+    matches = scored.slice(0, SEARCH_LIMIT).map(s => s.a);
+    if (!matches.length) activeIdx = -1;
   }
 
   function choose(i) {
     const m = matches[i];
     if (!m) return;
-    input.value = m.address || m.company_name || '';
+    input.value = m.company_name || m.address || '';
     close();
     showSearchResult(m);
   }
