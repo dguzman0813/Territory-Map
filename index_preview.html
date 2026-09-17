@@ -489,7 +489,7 @@
 
 <header>
   <h1>Sales Territory Map</h1>
-  <p>Account manager zones across Los Angeles, Chicago, and Milwaukee/N. Illinois</p>
+  <p>Account manager zones across Los Angeles, Sacramento, Chicago/Milwaukee, New York/New Jersey, and Maryland/Virginia</p>
 </header>
 
 <div id="banner"></div>
@@ -639,8 +639,8 @@
     </div>
 
     <div class="total-summary">
-      <strong>Combined Milwaukee + N. Illinois Zone</strong>
-      The Milwaukee account manager covers all of Milwaukee market plus Lake County IL and McHenry County (the northern Illinois suburbs near the WI border).
+      <strong>Combined Chicago + Milwaukee Zone</strong>
+      One account manager covers this whole market: Chicago and Cook County, the DuPage/Will/Kane collar, NW Indiana, the full Milwaukee WI market, and the northern Illinois suburbs near the WI border.
     </div>
 
     <div class="legend-info">
@@ -1073,7 +1073,9 @@ function drawOverlaysForMarkets(markets) {
     if (!zone) continue;
     if (!markets.includes(zone.market)) continue;
 
-    // Milwaukee + N. IL polygon should render in CHICAGO_MIL view
+    // v1.20: the three Chicago/Milwaukee overlay polygons in zones.json now name
+    // zones that no longer exist (merged into CHICAGO-MIL). The `if (!zone) continue;`
+    // above already skips them, same as it skips the old LA-NORTH / LA-INLAND shapes.
     L.polygon(polygon, {
       color: zone.color,
       weight: 2,
@@ -1276,23 +1278,41 @@ function updateZoneList(addrs) {
 }
 
 function renderZoneStructure() {
-  // Derive "LA: 4 zones, Chicago: 2 zones, Milwaukee: 1 zone, N managers total" from zones.json
+  // Derive "LA: 3 zones, Chicago + Milwaukee: 1 zone, ... N managers total" from zones.json.
+  // v1.20 (2026-09-17): the footer line used to print Object.values(ZONES).length, i.e. the
+  // ZONE count labelled "managers". That was wrong whenever one person owned more than one
+  // zone (Jorge held 2, Alex holds 2) and wrong again for the "Open" placeholder owners on
+  // NY-NJ and MD-VA. It now counts DISTINCT named account managers. Zone counts are unchanged.
   const byMarket = {};
   Object.values(ZONES).forEach(z => {
     byMarket[z.market] = (byMarket[z.market] || 0) + 1;
   });
-  const total = Object.values(ZONES).length;
+
+  // Distinct real people. "Open" is a placeholder for an unassigned zone, not a manager.
+  const managers = new Set();
+  let openZones = 0;
+  Object.values(ZONES).forEach(z => {
+    const name = (z.account_manager || '').trim();
+    if (!name || name.toLowerCase() === 'open') { openZones++; return; }
+    managers.add(name);
+  });
+
+  // "1 zone" / "2 zones" - previously hardcoded plural on the LA and Chicago lines.
+  const zn = n => `${n} zone${n > 1 ? 's' : ''}`;
 
   const lines = [];
-  if (byMarket['LOS ANGELES']) lines.push(`<div>• <b>LA:</b> ${byMarket['LOS ANGELES']} zones</div>`);
-  if (byMarket['CHICAGO'])     lines.push(`<div>• <b>Chicago:</b> ${byMarket['CHICAGO']} zones</div>`);
-  if (byMarket['MILWAUKEE'])   lines.push(`<div>• <b>Milwaukee + N. IL:</b> ${byMarket['MILWAUKEE']} zone${byMarket['MILWAUKEE']>1?'s':''}</div>`);
-  if (byMarket['SACRAMENTO'])  lines.push(`<div>• <b>Sacramento:</b> ${byMarket['SACRAMENTO']} zone${byMarket['SACRAMENTO']>1?'s':''}</div>`);
+  if (byMarket['LOS ANGELES']) lines.push(`<div>• <b>LA:</b> ${zn(byMarket['LOS ANGELES'])}</div>`);
+  const chiMil = (byMarket['CHICAGO'] || 0) + (byMarket['MILWAUKEE'] || 0);
+  if (chiMil) lines.push(`<div>• <b>Chicago + Milwaukee:</b> ${zn(chiMil)}</div>`);
+  if (byMarket['SACRAMENTO'])  lines.push(`<div>• <b>Sacramento:</b> ${zn(byMarket['SACRAMENTO'])}</div>`);
   const nynjZones = NY_NJ_MARKETS.reduce((n, m) => n + (byMarket[m] || 0), 0);
-  if (nynjZones) lines.push(`<div>• <b>New York + New Jersey:</b> ${nynjZones} zone${nynjZones>1?'s':''}</div>`);
+  if (nynjZones) lines.push(`<div>• <b>New York + New Jersey:</b> ${zn(nynjZones)}</div>`);
   const mdvaZones = MD_VA_MARKETS.reduce((n, m) => n + (byMarket[m] || 0), 0);
-  if (mdvaZones) lines.push(`<div>• <b>Maryland + Virginia:</b> ${mdvaZones} zone${mdvaZones>1?'s':''}</div>`);
-  lines.push(`<div style="margin-top:6px"><b>${total} managers total</b></div>`);
+  if (mdvaZones) lines.push(`<div>• <b>Maryland + Virginia:</b> ${zn(mdvaZones)}</div>`);
+  lines.push(`<div style="margin-top:6px"><b>${managers.size} manager${managers.size > 1 ? 's' : ''} total</b></div>`);
+  if (openZones) {
+    lines.push(`<div style="font-size:11px; color:#9ca3af">+ ${zn(openZones)} unassigned</div>`);
+  }
 
   document.getElementById('zoneStructure').innerHTML = lines.join('');
 }
