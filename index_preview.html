@@ -483,6 +483,60 @@
   .camp-key-pin { border-radius: 50%; background: #6b7280; display: inline-block; }
   .camp-key-pin.big { width: 11px; height: 11px; }
   .camp-key-pin.small { width: 7px; height: 7px; opacity: .5; }
+
+  /* ---- ZIP Lookup (v1.21, 2026-09-17) ----------------------------------- */
+  .zl-block {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .zl-block h3 {
+    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: #6b7280; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .zl-block .clear-link {
+    font-size: 11px; font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: #2563eb; cursor: pointer;
+  }
+  .zl-block .clear-link:hover { text-decoration: underline; }
+  .zl-block .clear-link.disabled { color: #d1d5db; cursor: default; text-decoration: none; }
+  .zl-row { display: flex; gap: 6px; }
+  .zl-input {
+    flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px;
+    padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+    background: white; color: #111827; letter-spacing: .06em;
+  }
+  .zl-input:focus { outline: none; border-color: #2563eb; }
+  .zl-input::placeholder { color: #9ca3af; letter-spacing: normal; }
+  .zl-go {
+    font: inherit; font-size: 11px; font-weight: 600; padding: 5px 12px; cursor: pointer;
+    border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #374151;
+    white-space: nowrap;
+  }
+  .zl-go:hover { background: #f3f4f6; }
+  .zl-result {
+    margin-top: 8px; padding: 8px 10px; border-radius: 6px;
+    background: white; border: 1px solid #e5e7eb;
+  }
+  .zl-result:empty { display: none; }
+  .zl-result.zl-hint { color: #6b7280; font-size: 11px; }
+  .zl-result.zl-owned    { border-left: 4px solid #16a34a; }
+  .zl-result.zl-open     { border-left: 4px solid #64748b; }
+  .zl-result.zl-unmapped { border-left: 4px solid #dc2626; }
+  .zl-zip {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #9ca3af;
+  }
+  .zl-owner {
+    font-size: 17px; font-weight: 700; color: #111827; line-height: 1.25; margin-top: 1px;
+  }
+  .zl-result.zl-open .zl-owner     { color: #475569; }
+  .zl-result.zl-unmapped .zl-owner { color: #b91c1c; }
+  .zl-sub {
+    margin-top: 3px; font-size: 11px; color: #6b7280;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .zl-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+  .zl-note { margin-top: 5px; font-size: 10px; color: #9ca3af; line-height: 1.45; }
 </style>
 </head>
 <body>
@@ -516,6 +570,20 @@
       <button class="market-btn" data-view="MD_VA">
         Maryland + Virginia <span class="count" data-count="MD_VA">—</span>
       </button>
+    </div>
+
+    <div class="zl-block">
+      <h3>
+        ZIP Lookup
+        <a class="clear-link disabled" id="clearZipLookup">Clear</a>
+      </h3>
+      <div class="zl-row">
+        <input type="text" id="zipLookupInput" class="zl-input"
+               placeholder="Enter a ZIP code…" autocomplete="off"
+               inputmode="numeric" maxlength="5">
+        <button type="button" class="zl-go" id="zipLookupGo">Look up</button>
+      </div>
+      <div class="zl-result" id="zipLookupResult"></div>
     </div>
 
     <div class="filters">
@@ -2127,6 +2195,193 @@ function showSearchResult(a) {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-typeahead')) close();
   });
+})();
+
+// ============================================================================
+// ZIP LOOKUP (v1.21, 2026-09-17) — type a ZIP, get the account manager who
+// owns it. Built for AMs in the field who know the ZIP but not the territory.
+//
+// Answer precedence, and why it runs in this order:
+//   1. zones.json's zip_list rule. That is the authority — 5,169 ZIPs are
+//      enumerated there by hand. It also covers the 728 PO-box-only ZIPs that
+//      ARE owned but have no polygon in zip_layer.geojson (5,169 owned vs 4,441
+//      shapes); resolving by polygon alone would wrongly answer "Not Mapped"
+//      for 14% of the territory.
+//   2. ZIP not in a zip_list but it does have a polygon → fall through to
+//      assignZoneForZip() so the fallback rules still get their say (today
+//      that is milwaukee_market → CHICAGO-MIL).
+//   3. Polygon exists, no rule claims it              → "Open".
+//   4. Not in any zip_list and no polygon             → "Not Mapped".
+//
+// "Open" is also the answer when a zone exists but nobody owns it yet — NY-NJ
+// and MD-VA both carry account_manager "Open" as of zones.json v1.19. That is
+// deliberate: an unowned territory and an unclaimed ZIP are the same answer to
+// the rep asking the question.
+//
+// This block reads zones.json and zip_layer.geojson only. It needs no API key,
+// so unlike Radius search it can take typed input (see workflow rule 3).
+// ============================================================================
+const ZIP_LOOKUP_LAYER = L.layerGroup();
+
+let ZIP_ZONE_INDEX    = null;  // Map "12345" -> zone_id, built once from ASSIGNMENT_RULES
+let ZIP_FEATURE_INDEX = null;  // Map "12345" -> GeoJSON feature, built once from ZIP_LAYER_DATA
+
+// First zone whose list holds the ZIP wins — same precedence assignZoneForZip
+// uses, so the lookup can never disagree with the colour on the map.
+function buildZipZoneIndex() {
+  const idx = new Map();
+  for (const rule of ASSIGNMENT_RULES) {
+    if (rule.type !== 'zip_list') continue;
+    const zipMap = (rule.params && rule.params.zips) || {};
+    for (const [zoneId, zips] of Object.entries(zipMap)) {
+      for (const z of zips) {
+        const k = zip5(z);
+        if (k && !idx.has(k)) idx.set(k, zoneId);
+      }
+    }
+  }
+  return idx;
+}
+
+function buildZipFeatureIndex() {
+  const idx = new Map();
+  const feats = (ZIP_LAYER_DATA && ZIP_LAYER_DATA.features) || [];
+  for (const f of feats) {
+    const k = zip5(f.properties && f.properties.zip);
+    if (k && !idx.has(k)) idx.set(k, f);
+  }
+  return idx;
+}
+
+// Returns { status: 'owned'|'open'|'unmapped', zip, zoneId, zone, owner, feature }
+function lookupZipOwner(raw) {
+  const zip = zip5(raw);
+  if (!zip) return { status: 'unmapped', zip: '', zoneId: null, zone: null, owner: null, feature: null };
+
+  if (!ZIP_ZONE_INDEX) ZIP_ZONE_INDEX = buildZipZoneIndex();
+  if (!ZIP_FEATURE_INDEX && ZIP_LAYER_DATA) ZIP_FEATURE_INDEX = buildZipFeatureIndex();
+
+  const feature = (ZIP_FEATURE_INDEX && ZIP_FEATURE_INDEX.get(zip)) || null;
+  let zoneId = ZIP_ZONE_INDEX.get(zip) || null;
+
+  // Not enumerated, but we have geometry — let the fallback rules run.
+  if (!zoneId && feature) {
+    const c = geomCentroid(feature.geometry);
+    // GeoJSON coords are [lng,lat]; the rule polygons are [lat,lng], so swap.
+    if (c) zoneId = assignZoneForZip(feature.properties, [c[1], c[0]]);
+  }
+
+  if (!zoneId) {
+    return feature
+      ? { status: 'open',     zip, zoneId: null, zone: null, owner: 'Open', feature }
+      : { status: 'unmapped', zip, zoneId: null, zone: null, owner: null,   feature: null };
+  }
+
+  // A zoneId with no matching zone means a stale ID survived in zones.json —
+  // report it as unowned rather than printing a blank name (workflow rule 9).
+  const zone = ZONES[zoneId] || null;
+  const mgr  = ((zone && zone.account_manager) || '').trim();
+  const open = !mgr || mgr.toLowerCase() === 'open';
+  return {
+    status: open ? 'open' : 'owned',
+    zip, zoneId, zone,
+    owner: open ? 'Open' : mgr,
+    feature,
+  };
+}
+
+function clearZipLookup() {
+  ZIP_LOOKUP_LAYER.clearLayers();
+  const out  = document.getElementById('zipLookupResult');
+  const link = document.getElementById('clearZipLookup');
+  if (out)  { out.innerHTML = ''; out.className = 'zl-result'; }
+  if (link) link.classList.add('disabled');
+}
+
+function runZipLookup() {
+  const input = document.getElementById('zipLookupInput');
+  const out   = document.getElementById('zipLookupResult');
+  const link  = document.getElementById('clearZipLookup');
+  if (!input || !out) return;
+
+  ZIP_LOOKUP_LAYER.clearLayers();
+  const digits = (input.value || '').replace(/\D/g, '');
+
+  if (!digits) { clearZipLookup(); return; }
+  if (link) link.classList.remove('disabled');
+
+  // Accept 4 digits and zero-pad: a NJ rep typing 7001 means 07001.
+  if (digits.length < 4) {
+    out.className = 'zl-result zl-hint';
+    out.textContent = 'Enter a 5-digit ZIP code.';
+    return;
+  }
+
+  const r = lookupZipOwner(digits);
+  const zipTxt = escapeHtml(r.zip);
+
+  if (r.status === 'unmapped') {
+    out.className = 'zl-result zl-unmapped';
+    out.innerHTML =
+      '<div class="zl-zip">ZIP ' + zipTxt + '</div>' +
+      '<div class="zl-owner">Not Mapped</div>' +
+      '<div class="zl-sub">Outside every market this map covers.</div>';
+    return;
+  }
+
+  const label = r.zone ? (r.zone.label || r.zoneId) : (r.zoneId || '');
+  const color = (r.zone && r.zone.color) || '#9ca3af';
+
+  out.className = 'zl-result ' + (r.status === 'open' ? 'zl-open' : 'zl-owned');
+  out.innerHTML =
+    '<div class="zl-zip">ZIP ' + zipTxt + '</div>' +
+    '<div class="zl-owner">' + escapeHtml(r.owner) + '</div>' +
+    (label
+      ? '<div class="zl-sub"><span class="zl-dot" style="background:' + escapeHtml(color) + '"></span>' +
+        escapeHtml(label) + '</div>'
+      : '');
+
+  if (r.feature) {
+    const layer = L.geoJSON(r.feature, {
+      style: { color: '#eab308', weight: 3, fillColor: color, fillOpacity: 0.25 },
+    });
+    layer.addTo(ZIP_LOOKUP_LAYER);
+    if (typeof layer.bringToFront === 'function') layer.bringToFront();
+    try {
+      map.fitBounds(layer.getBounds(), { maxZoom: 13, padding: [40, 40] });
+    } catch (e) {
+      console.warn('ZIP Lookup: could not fit bounds for ' + r.zip, e);
+    }
+  } else {
+    // Owned, but a PO-box-only ZIP with no ZCTA shape — say so rather than
+    // leaving the rep wondering why the map did not move.
+    out.innerHTML += '<div class="zl-note">No ZIP boundary on file, so the map did not move. ' +
+                     'PO-box-only ZIPs have no shape to draw.</div>';
+  }
+}
+
+(function wireZipLookup() {
+  const input = document.getElementById('zipLookupInput');
+  const go    = document.getElementById('zipLookupGo');
+  const link  = document.getElementById('clearZipLookup');
+  if (!input || !go || !link) return;
+
+  ZIP_LOOKUP_LAYER.addTo(map);
+
+  // Auto-answer the moment a full ZIP is typed; no need to press anything.
+  input.addEventListener('input', () => {
+    const d = (input.value || '').replace(/\D/g, '');
+    if (!d) { clearZipLookup(); return; }
+    if (d.length === 5) runZipLookup();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')       { e.preventDefault(); runZipLookup(); }
+    else if (e.key === 'Escape') { input.value = ''; clearZipLookup(); }
+  });
+
+  go.addEventListener('click', runZipLookup);
+  link.addEventListener('click', () => { input.value = ''; clearZipLookup(); });
 })();
 
 document.getElementById('clearFilters').addEventListener('click', clearAllFilters);
