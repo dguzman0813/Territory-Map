@@ -883,7 +883,10 @@ let ZIP_DEMOGRAPHICS = null; // { "90210": { population, median_household_income
 let DEMO_HOVER_ZIP = null;   // ZIP code currently hovered (null = show scope aggregate)
 
 // User-controlled filters (compose with the market view).
-// managers/carriers: empty Set = "no filter, show everything in scope".
+// managers: empty Set = "no filter, show everything in scope".
+// carriers: NOT the same rule — an empty Set means "show NO pins". At least one
+//   carrier must be selected. All of them are selected at load, and "Clear all"
+//   re-selects them all rather than emptying the Set.
 // search: lowercased substring; empty = no filter.
 const FILTERS = {
   managers: new Set(),
@@ -986,7 +989,11 @@ function getDataFilterMatchingZips() {
 // MAP — initialized immediately so the tile layer paints before data arrives.
 // View is reset once zones.json loads (uses MARKET_VIEWS.ALL).
 // ============================================================================
-const map = L.map('map').setView([38.5, -100], 4);
+// preferCanvas: the HubSpot deal sync roughly doubles the pin count to
+// ~10,000 CircleMarkers, and with every carrier on at load they are all
+// drawn at once. Leaflet's default SVG renderer makes one DOM node per
+// pin and cannot pan or zoom smoothly at that volume; canvas can.
+const map = L.map('map', { preferCanvas: true }).setView([38.5, -100], 4);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors',
   maxZoom: 18,
@@ -1565,13 +1572,18 @@ function buildFilterControls() {
         `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
         `background:${col};margin-right:6px;vertical-align:middle"></span>${escapeHtml(carrier)}`;
       pill.addEventListener('click', () => togglePill('carriers', carrier, col, pill));
-      // Default the Carrier filter to Cricket only: on load, show Cricket pins
-      // and hide Non-Wireless Investor (MTL) until the user selects that pill.
-      if (carrier === 'Cricket') {
-        FILTERS.carriers.add(carrier);
-        pill.classList.add('on');
-        pill.style.background = col;
-      }
+      // 2026-09-21: every carrier is ON at load. It used to be Cricket only,
+      // which meant competitor doors and Non-Wireless Investor (MTL) pins were
+      // invisible until you knew to click their pills, and first-time viewers
+      // concluded the data was missing.
+      //
+      // Why ADD every carrier instead of just leaving the Set empty: an empty
+      // FILTERS.carriers means "show NO pins", not "show all" — see the carrier
+      // line in rowMatchesFilters(). Deleting this block would have loaded an
+      // empty map.
+      FILTERS.carriers.add(carrier);
+      pill.classList.add('on');
+      pill.style.background = col;
       carEl.appendChild(pill);
     });
   }
@@ -1639,7 +1651,11 @@ function togglePill(setName, value, color, el) {
 
 function clearAllFilters() {
   FILTERS.managers.clear();
-  FILTERS.carriers.clear();
+  // 2026-09-21: carriers are re-selected, not cleared. An empty
+  // FILTERS.carriers means "show no pins" (see rowMatchesFilters), so clearing
+  // it blanked the whole map — the opposite of what "Clear all" should do.
+  // Restore the load state instead: every carrier on.
+  reselectAllCarriers();
   FILTERS.worked.clear();
   FILTERS.opportunities.clear();
   FILTERS.pipelines.clear();
@@ -1650,11 +1666,27 @@ function clearAllFilters() {
   }
   document.getElementById('filterSearch').value = '';
   clearSearchResult();
+  // Carrier pills are deliberately excluded: reselectAllCarriers() has just
+  // turned them all back on, and this sweep would undo that.
   document.querySelectorAll('.pill.on').forEach(p => {
+    if (p.dataset.kind === 'carrier') return;
     p.classList.remove('on');
     p.style.background = '';
   });
   applyFiltersAndRender();
+}
+
+// Puts the Carrier filter back to its load state: every carrier selected and
+// every carrier pill lit. Used by clearAllFilters().
+function reselectAllCarriers() {
+  FILTERS.carriers.clear();
+  document.querySelectorAll('.pill[data-kind="carrier"]').forEach(p => {
+    const carrier = p.dataset.value;
+    if (!carrier) return;
+    FILTERS.carriers.add(carrier);
+    p.classList.add('on');
+    p.style.background = pinColor({ industry: carrier });
+  });
 }
 
 function updateClearLink() {
