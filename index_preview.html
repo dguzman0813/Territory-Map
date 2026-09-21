@@ -611,6 +611,16 @@
   }
   .zl-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
   .zl-note { margin-top: 5px; font-size: 10px; color: #9ca3af; line-height: 1.45; }
+  /* Per-ZIP Census block inside the lookup card. Deliberately reuses the
+     .demo-row / .demo-race-bar / .demo-empty styles from the Demographics
+     panel so the two never drift apart. The first .demo-section-header is
+     this block's first child, so its :first-child rule drops the extra rule
+     line and the border-top below sits right under the zone label. */
+  .zl-demo {
+    margin-top: 9px; padding-top: 9px;
+    border-top: 1px solid #e5e7eb;
+    font-size: 11.5px;
+  }
 </style>
 </head>
 <body>
@@ -2414,6 +2424,23 @@ function lookupZipOwner(raw) {
   };
 }
 
+// Exact Census numbers for one ZIP, for the lookup card. Calls the same
+// renderDemoRows() the Demographics panel uses (isAggregate = false), so the
+// labels, formatting and race bar are identical — one source of truth. These
+// are the raw per-ZIP values: the sidebar data filter does NOT narrow them.
+function zipLookupDemoBlock(zip) {
+  if (!ZIP_DEMOGRAPHICS) {
+    return '<div class="zl-demo"><div class="demo-empty">Loading Census data…</div></div>';
+  }
+  const r = ZIP_DEMOGRAPHICS[zip];
+  // Same emptiness test the panel uses: a record can exist with a null
+  // population when the Census suppressed it.
+  if (!r || r.population == null) {
+    return '<div class="zl-demo"><div class="demo-empty">No Census data for this ZIP</div></div>';
+  }
+  return '<div class="zl-demo">' + renderDemoRows(r, false) + '</div>';
+}
+
 function clearZipLookup() {
   ZIP_LOOKUP_LAYER.clearLayers();
   const out  = document.getElementById('zipLookupResult');
@@ -2463,7 +2490,8 @@ function runZipLookup() {
     (label
       ? '<div class="zl-sub"><span class="zl-dot" style="background:' + escapeHtml(color) + '"></span>' +
         escapeHtml(label) + '</div>'
-      : '');
+      : '') +
+    zipLookupDemoBlock(r.zip);
 
   if (r.feature) {
     const layer = L.geoJSON(r.feature, {
