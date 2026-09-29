@@ -207,6 +207,16 @@
   .demo-footnote {
     color: #9ca3af; font-size: 10px; margin-top: 6px; line-height: 1.4;
   }
+  /* ---- Carrier share (doors) — v1.23, 2026-09-29 ---- */
+  .cs-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .cs-pct {
+    display: inline-block; min-width: 36px; text-align: right;
+    color: #6b7280; font-weight: 500; margin-left: 8px;
+  }
+  .cs-note { color: #9ca3af; font-size: 10px; margin-top: 4px; line-height: 1.4; }
 
   /* ---- Filter ZIPs by data (sidebar) — Day 2+ addition ---- */
   .datafilter-block { margin-bottom: 24px; }
@@ -1887,11 +1897,12 @@ function renderDemographicsPanel() {
     titleEl.textContent = 'ZIP ' + DEMO_HOVER_ZIP;
     scopeEl.textContent = '— hover';
     if (!r || r.population == null) {
-      grid.innerHTML = '<div class="demo-empty">No Census data for this ZIP</div>';
+      grid.innerHTML = '<div class="demo-empty">No Census data for this ZIP</div>' +
+                     renderCarrierShareRows(DEMO_HOVER_ZIP);  // v1.23
       noteEl.textContent = '';
       return;
     }
-    grid.innerHTML = renderDemoRows(r, false);
+    grid.innerHTML = renderDemoRows(r, false) + renderCarrierShareRows(DEMO_HOVER_ZIP);  // v1.23
     noteEl.textContent = '';
     return;
   }
@@ -1965,6 +1976,127 @@ function renderDemoRows(r, isAggregate) {
     rows.push(`<div class="demo-row"><span class="demo-label">${label}</span><span class="demo-value">${fmtPct(pct)}</span></div>`);
   }
   return rows.join('');
+}
+
+// ============================================================================
+// CARRIER SHARE (v1.23, 2026-09-29) — door count + % by carrier for one ZIP.
+// Shown in the ZIP hover tooltip and in the Demographics panel while hovering.
+//
+// Rules (Daniel's choices, 2026-09-29):
+//   - Only carriers lit in the Carrier filter count. Turn Boost off and Boost
+//     drops out of the count AND the % (the others re-split to 100%).
+//   - Non-Wireless Investor never counts, even when its pill is lit.
+//   - No other filter (manager, contact status, campaign, data filter...)
+//     changes the numbers.
+//   - A door belongs to the ZIP in its row's `zip` column (same rule Campaigns
+//     use), not to the polygon its pin sits in. If `zip` is blank, a ZIP at
+//     the very END of the address is used. Never a loose 5-digit scan: the
+//     "10401" in "10401 Foster Ave" is a house number.
+//   - This is a count of doors on the map, not sales or subscriber share.
+//     ADDRESSES only holds geocoded rows, so the counts match the pins.
+// ============================================================================
+var CARRIER_ZIP_INDEX = null;      // Map zip5 -> Map carrier -> door count
+var CARRIER_ZIP_INDEX_SRC = null;  // the ADDRESSES array the index was built from
+var CARRIER_WIRELESS_LIST = [];    // every wireless carrier in the data, sorted
+
+function isNonWirelessIndustry(industry) {
+  return /non-wireless/i.test(industry || '');
+}
+
+function carrierShareZip(a) {
+  const z = zip5(a.zip);
+  if (z) return z;
+  const m = /(\d{5})(?:-\d{4})?\s*$/.exec(a.address || '');
+  return m ? m[1] : '';
+}
+
+function ensureCarrierZipIndex() {
+  if (CARRIER_ZIP_INDEX && CARRIER_ZIP_INDEX_SRC === ADDRESSES) return;
+  const idx = new Map();
+  const all = new Set();
+  for (const a of ADDRESSES) {
+    const carrier = (a.industry || '').trim();
+    if (!carrier || isNonWirelessIndustry(carrier)) continue;
+    all.add(carrier);
+    const z = carrierShareZip(a);
+    if (!z) continue;
+    let m = idx.get(z);
+    if (!m) { m = new Map(); idx.set(z, m); }
+    m.set(carrier, (m.get(carrier) || 0) + 1);
+  }
+  CARRIER_ZIP_INDEX = idx;
+  CARRIER_ZIP_INDEX_SRC = ADDRESSES;
+  CARRIER_WIRELESS_LIST = Array.from(all).sort();
+}
+
+// Returns { total, rows: [{carrier, count, pct, color}], off: [carriers], anyOn }
+function carrierShareForZip(zip) {
+  ensureCarrierZipIndex();
+  const off  = CARRIER_WIRELESS_LIST.filter(c => !FILTERS.carriers.has(c));
+  const anyOn = CARRIER_WIRELESS_LIST.some(c => FILTERS.carriers.has(c));
+  const m = CARRIER_ZIP_INDEX.get(zip5(zip));
+  const rows = [];
+  let total = 0;
+  if (m) {
+    for (const [carrier, count] of m) {
+      if (!FILTERS.carriers.has(carrier)) continue;
+      rows.push({ carrier, count, pct: 0, color: pinColor({ industry: carrier }) });
+      total += count;
+    }
+  }
+  // Most doors first; ties alphabetical so the order never jumps around.
+  rows.sort((x, y) => (y.count - x.count) || x.carrier.localeCompare(y.carrier));
+  // Whole-number % that always add up to exactly 100 (largest remainder).
+  if (total > 0) {
+    const raw = rows.map(r => r.count * 100 / total);
+    rows.forEach((r, i) => { r.pct = Math.floor(raw[i]); });
+    let left = 100 - rows.reduce((s, r) => s + r.pct, 0);
+    const order = rows.map((r, i) => i)
+      .sort((i, j) => ((raw[j] - rows[j].pct) - (raw[i] - rows[i].pct)) || (i - j));
+    for (let k = 0; k < order.length && left > 0; k++, left--) rows[order[k]].pct += 1;
+  }
+  return { total, rows, off, anyOn };
+}
+
+// One line for the ZIP hover tooltip.
+function carrierShareTooltipLine(zip) {
+  const s = carrierShareForZip(zip);
+  if (!s.anyOn) return 'Carriers: <em>none selected</em>';
+  if (!s.total) return 'Carriers: <em>no doors on file</em>';
+  return 'Carriers: ' + s.rows.map(r =>
+    `<span class="cs-dot" style="background:${r.color};width:7px;height:7px;margin-right:3px"></span>` +
+    `${escapeHtml(r.carrier)} <strong>${r.count}</strong> (${r.pct}%)`
+  ).join(' · ');
+}
+
+// Section for the Demographics panel in hover mode.
+function renderCarrierShareRows(zip) {
+  const s = carrierShareForZip(zip);
+  const out = ['<div class="demo-row demo-section-header">Carrier share (doors)</div>'];
+  if (!s.anyOn) {
+    out.push('<div class="demo-empty">No carriers selected in the Carrier filter</div>');
+    return out.join('');
+  }
+  if (!s.total) {
+    out.push('<div class="demo-empty">No carrier doors on file for this ZIP</div>');
+  } else {
+    const segs = s.rows.map(r =>
+      `<span class="demo-race-bar-seg" style="width:${r.count * 100 / s.total}%;background:${r.color}" ` +
+      `title="${escapeHtml(r.carrier)} ${r.pct}%"></span>`).join('');
+    out.push(`<div class="demo-race-bar">${segs}</div>`);
+    for (const r of s.rows) {
+      out.push(
+        `<div class="demo-row"><span class="demo-label"><span class="cs-dot" style="background:${r.color}"></span>` +
+        `${escapeHtml(r.carrier)}</span><span class="demo-value">${r.count.toLocaleString()}` +
+        `<span class="cs-pct">${r.pct}%</span></span></div>`);
+    }
+    out.push(`<div class="demo-row"><span class="demo-label">Total doors</span>` +
+             `<span class="demo-value">${s.total.toLocaleString()}<span class="cs-pct"></span></span></div>`);
+  }
+  if (s.off.length) {
+    out.push(`<div class="cs-note">Only lit carriers count. Off: ${s.off.map(escapeHtml).join(', ')}.</div>`);
+  }
+  return out.join('');
 }
 
 // ============================================================================
@@ -2158,25 +2290,33 @@ function renderZipLayer() {
       const p = feat.properties;
       const zoneId = p._zoneCached;
       const zone = zoneId ? ZONES[zoneId] : null;
-      const lines = [
-        `<strong>${p.zip}</strong> — ${p.city || '?'}, ${p.state || '?'}`,
-        `${p.county || ''}`,
-        `Zone: ${zone ? zone.label : '(unassigned)'}`,
-      ];
-      // Day 2: append demographic details if we have them
-      const demo = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[p.zip];
-      if (demo && demo.population != null) {
-        lines.push('—');  // separator
-        lines.push(`Pop: <strong>${fmtNum(demo.population)}</strong> · Density: <strong>${fmtDensity(demo.population_density)}</strong>`);
-        lines.push(`Median income: <strong>${fmtMoney(demo.median_household_income)}</strong>`);
-        const races = [];
-        if (demo.pct_hispanic != null && demo.pct_hispanic > 0) races.push(`H ${demo.pct_hispanic.toFixed(0)}%`);
-        if (demo.pct_white_nh != null && demo.pct_white_nh > 0) races.push(`W ${demo.pct_white_nh.toFixed(0)}%`);
-        if (demo.pct_black_nh != null && demo.pct_black_nh > 0) races.push(`B ${demo.pct_black_nh.toFixed(0)}%`);
-        if (demo.pct_asian_nh != null && demo.pct_asian_nh > 0) races.push(`A ${demo.pct_asian_nh.toFixed(0)}%`);
-        if (races.length) lines.push(races.join(' · '));
-      }
-      layer.bindTooltip(lines.join('<br>'), { sticky: true });
+      // v1.23: the tooltip is a function, so it is worked out each time it
+      // opens. The carrier line follows the Carrier pills, and the Census and
+      // carrier lines still appear if their data finished loading after this
+      // layer was drawn (before, a late zip_demographics.json left the
+      // Census lines out of the tooltip until the layer was redrawn).
+      const tooltipHtml = () => {
+        const lines = [
+          `<strong>${p.zip}</strong> — ${p.city || '?'}, ${p.state || '?'}`,
+          `${p.county || ''}`,
+          `Zone: ${zone ? zone.label : '(unassigned)'}`,
+        ];
+        // Day 2: append demographic details if we have them
+        const demo = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[p.zip];
+        if (demo && demo.population != null) {
+          lines.push('—');  // separator
+          lines.push(`Pop: <strong>${fmtNum(demo.population)}</strong> · Density: <strong>${fmtDensity(demo.population_density)}</strong>`);
+          lines.push(`Median income: <strong>${fmtMoney(demo.median_household_income)}</strong>`);
+          const races = [];
+          if (demo.pct_hispanic != null && demo.pct_hispanic > 0) races.push(`H ${demo.pct_hispanic.toFixed(0)}%`);
+          if (demo.pct_white_nh != null && demo.pct_white_nh > 0) races.push(`W ${demo.pct_white_nh.toFixed(0)}%`);
+          if (demo.pct_black_nh != null && demo.pct_black_nh > 0) races.push(`B ${demo.pct_black_nh.toFixed(0)}%`);
+          if (demo.pct_asian_nh != null && demo.pct_asian_nh > 0) races.push(`A ${demo.pct_asian_nh.toFixed(0)}%`);
+          if (races.length) lines.push(races.join(' · '));
+        }
+        return lines.join('<br>') + '<br>—<br>' + carrierShareTooltipLine(p.zip);
+      };
+      layer.bindTooltip(tooltipHtml, { sticky: true });
 
       // Day 2: hovering switches the sidebar Demographics panel to per-ZIP mode
       layer.on('mouseover', () => {
