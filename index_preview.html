@@ -255,10 +255,15 @@
   .datafilter-status.active { color: #ca8a04; font-weight: 500; }
   /* v1.26: several filter lines (AND) + carrier share fields */
   .datafilter-rows { display: flex; flex-direction: column; }
-  .datafilter-and {
-    font-size: 10px; font-weight: 600; color: #9ca3af; letter-spacing: .08em;
-    text-align: center; margin: 4px 0;
+  .datafilter-and { display: flex; justify-content: center; margin: 4px 0; }
+  /* v1.27: AND / OR switch. One setting for every line. */
+  .datafilter-join {
+    font-family: inherit; font-size: 10px; font-weight: 700; letter-spacing: .08em;
+    padding: 2px 12px; border: 1px solid #d1d5db; border-radius: 100px;
+    background: white; color: #6b7280; cursor: pointer;
   }
+  .datafilter-join:hover { border-color: #2563eb; color: #2563eb; }
+  .datafilter-join.or { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
   .datafilter-row { position: relative; }
   .datafilter-row.has-remove { padding-right: 32px; }
   .datafilter-remove {
@@ -946,7 +951,7 @@ const FILTERS = {
 };
 
 // Data filter (Day 2+, reworked v1.26 2026-09-29).
-// One or more filter lines, ANDed together. Each line is a Census field or,
+// One or more filter lines, joined by AND or (v1.27) OR. Each line is a Census field or,
 // from v1.26, a carrier's share of the doors in the ZIP ("Cricket share < 10").
 // Half-typed lines (field picked, no value yet) are ignored until complete.
 //
@@ -958,6 +963,8 @@ const FILTERS = {
 //             Daniel, 2026-09-29: "less importance but still noticeable".
 //   'fail'    fails any line, or has no Census value for a Census line
 //             -> dim grey, pins hidden.
+//   With OR (v1.27): 'match' if ANY line passes; else 'nodoors' if a
+//   carrier-share line could not be judged (no doors); else 'fail'.
 //
 // Carrier share uses the same numbers as the ZIP hover tooltip
 // (carrierShareForZip): lit carrier pills only, Non-Wireless Investor never
@@ -966,6 +973,10 @@ const FILTERS = {
 const DATA_FILTER_MAX_ROWS = 5;
 const DATA_FILTER_SHARE_PREFIX = 'share:';
 const DATA_FILTERS = [];   // one { field, operator, value, value2 } per line on screen
+// v1.27: how the lines combine. 'and' = a ZIP must pass every line;
+// 'or' = passing any one line is enough. One switch for all lines
+// (Daniel, 2026-09-29); clicking any divider flips them all. Clear resets it.
+let DATA_FILTER_MODE = 'and';
 
 const DATA_FILTER_FIELD_LABELS = {
   median_household_income: 'income',
@@ -1034,7 +1045,7 @@ let DF_CACHE_DEMO = null;
 
 function dataFilterKey(lines) {
   return JSON.stringify(lines.map(f => [f.field, f.operator, f.value, f.value2])) +
-         '|' + Array.from(FILTERS.carriers).sort().join(',');
+         '|' + Array.from(FILTERS.carriers).sort().join(',') + '|' + DATA_FILTER_MODE;
 }
 
 // 'match' | 'nodoors' | 'fail'. Always 'match' when no line is active.
@@ -1049,18 +1060,39 @@ function zipDataFilterState(zip) {
     DF_CACHE_KEY = key; DF_CACHE_ADDR = ADDRESSES; DF_CACHE_DEMO = ZIP_DEMOGRAPHICS;
   }
   if (DF_CACHE.has(z)) return DF_CACHE.get(z);
-  let state = 'match';
   let share = null;   // worked out once per ZIP, only if a share line needs it
-  for (const f of lines) {
+  // One line's answer for this ZIP: 'pass' | 'nodoors' | 'fail'.
+  const judge = (f) => {
     if (isShareField(f.field)) {
       if (!share) share = carrierShareForZip(z);
-      if (!share.total) { state = 'nodoors'; continue; }
+      if (!share.total) return 'nodoors';
       const row = share.rows.find(r => r.carrier === shareFieldCarrier(f.field));
-      if (!compareDataFilterValue(row ? row.pct : 0, f)) { state = 'fail'; break; }
-    } else {
-      const rec = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[z];
-      const v = rec ? rec[f.field] : null;
-      if (v == null || !compareDataFilterValue(v, f)) { state = 'fail'; break; }
+      return compareDataFilterValue(row ? row.pct : 0, f) ? 'pass' : 'fail';
+    }
+    const rec = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[z];
+    const v = rec ? rec[f.field] : null;
+    return (v != null && compareDataFilterValue(v, f)) ? 'pass' : 'fail';
+  };
+  let state;
+  if (DATA_FILTER_MODE === 'or') {
+    // v1.27: any one line passing is enough. If none pass but a share line
+    // could not be judged, the ZIP still shows as "no carrier doors".
+    let sawNoDoors = false;
+    state = null;
+    for (const f of lines) {
+      const r = judge(f);
+      if (r === 'pass') { state = 'match'; break; }
+      if (r === 'nodoors') sawNoDoors = true;
+    }
+    if (!state) state = sawNoDoors ? 'nodoors' : 'fail';
+  } else {
+    // AND: every line must pass. A share line with no doors cannot fail the
+    // ZIP, so it drops to "no carrier doors" unless another line fails it.
+    state = 'match';
+    for (const f of lines) {
+      const r = judge(f);
+      if (r === 'fail') { state = 'fail'; break; }
+      if (r === 'nodoors') state = 'nodoors';
     }
   }
   DF_CACHE.set(z, state);
@@ -1095,9 +1127,11 @@ function describeDataFilterLine(f) {
 }
 
 // Human-readable filter for the status / scope display.
-// Example: "income > $50,000 & Cricket share < 10%".
+// Example: "income > $50,000 & Cricket share < 10%" (AND) or
+// "income > $50,000 or Cricket share < 10%" (OR, v1.27).
 function describeDataFilter() {
-  return activeDataFilterLines().map(describeDataFilterLine).filter(Boolean).join(' & ');
+  return activeDataFilterLines().map(describeDataFilterLine).filter(Boolean)
+    .join(DATA_FILTER_MODE === 'or' ? ' or ' : ' & ');
 }
 
 // Every ZIP the filter can judge: Census ZIPs, ZIP polygons, ZIPs with doors.
@@ -3200,7 +3234,7 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
 // ============================================================================
 // DATA FILTER WIRING — Day 2+
 // ============================================================================
-// v1.26: the block holds 1 to 5 filter lines, ANDed. Each line on screen is
+// v1.26: the block holds 1 to 5 filter lines, joined by AND or (v1.27) OR. Each line on screen is
 // built by buildDataFilterRow() and writes into its DATA_FILTERS entry.
 // "+ Add another filter" appends a line, x removes one, Clear goes back to a
 // single empty line. Half-typed lines are ignored until they have a value.
@@ -3338,10 +3372,24 @@ function renderDataFilterRows() {
   box.innerHTML = '';
   DATA_FILTERS.forEach((f, i) => {
     if (i > 0) {
-      const and = document.createElement('div');
-      and.className = 'datafilter-and';
-      and.textContent = 'AND';
-      box.appendChild(and);
+      // v1.27: the divider is the AND / OR switch. One setting for all lines.
+      const wrap = document.createElement('div');
+      wrap.className = 'datafilter-and';
+      const isOr = DATA_FILTER_MODE === 'or';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'datafilter-join' + (isOr ? ' or' : '');
+      btn.textContent = isOr ? 'OR' : 'AND';
+      btn.title = isOr ? 'Match ANY line. Click to switch to AND.'
+                       : 'Match EVERY line. Click to switch to OR.';
+      btn.setAttribute('aria-label', btn.title);
+      btn.addEventListener('click', () => {
+        DATA_FILTER_MODE = isOr ? 'and' : 'or';
+        renderDataFilterRows();
+        applyFiltersAndRender();
+      });
+      wrap.appendChild(btn);
+      box.appendChild(wrap);
     }
     box.appendChild(buildDataFilterRow(f));
   });
@@ -3356,7 +3404,8 @@ function renderDataFilterRows() {
 function restyleZipsForDataFilter() {
   const hasShareLine = DATA_FILTERS.some(f => dataFilterLineComplete(f) && isShareField(f.field));
   const key = JSON.stringify(activeDataFilterLines().map(f => [f.field, f.operator, f.value, f.value2])) +
-              '|' + (hasShareLine ? Array.from(FILTERS.carriers).sort().join(',') : '');
+              '|' + (hasShareLine ? Array.from(FILTERS.carriers).sort().join(',') : '') +
+              '|' + DATA_FILTER_MODE;
   if (key === DF_STYLE_KEY) return;
   DF_STYLE_KEY = key;
   if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
@@ -3373,8 +3422,9 @@ function renderDataFilterStatus() {
     const matches = getDataFilterMatchingZips('match');
     const inScope = getInScopeZips('match').length;
     const one = matches.size === 1;
+    const howMany = DATA_FILTER_MODE === 'or' ? 'any of' : 'all';
     const what = active.length > 1
-      ? (one ? `ZIP matches all ${active.length} filters` : `ZIPs match all ${active.length} filters`)
+      ? (one ? `ZIP matches ${howMany} ${active.length} filters` : `ZIPs match ${howMany} ${active.length} filters`)
       : (one ? 'ZIP matches' : 'ZIPs match');
     out.push(`<span class="df-line"><span class="df-swatch match"></span>` +
              `${matches.size.toLocaleString()} ${what} (${inScope.toLocaleString()} in current scope)</span>`);
@@ -3412,6 +3462,7 @@ function renderDataFilterStatus() {
   });
 
   document.getElementById('clearDataFilter').addEventListener('click', () => {
+    DATA_FILTER_MODE = 'and';
     DATA_FILTERS.length = 0;
     DATA_FILTERS.push(newDataFilterLine());
     renderDataFilterRows();
