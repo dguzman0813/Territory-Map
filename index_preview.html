@@ -2792,7 +2792,12 @@ function clearZipLookup() {
 function zlOutlineAndZoom(features, colorFor) {
   ZIP_LOOKUP_LAYER.clearLayers();
   if (!features.length) return;
+  // v1.25: interactive:false so the outline never catches the mouse. It is
+  // drawn on top of the ZIP layer, and before this it swallowed every hover
+  // inside it: no tooltip and no sidebar hover on the ZIPs you had just
+  // looked up. Now the mouse passes through to the ZIP shape underneath.
   const layer = L.geoJSON({ type: 'FeatureCollection', features }, {
+    interactive: false,
     style: f => ({ color: '#eab308', weight: 3, fillColor: colorFor(f), fillOpacity: 0.25 }),
   });
   layer.addTo(ZIP_LOOKUP_LAYER);
