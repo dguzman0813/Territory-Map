@@ -631,6 +631,34 @@
     border-top: 1px solid #e5e7eb;
     font-size: 11.5px;
   }
+  /* ---- City Lookup (v1.24, 2026-09-29) ---- */
+  .zl-row { position: relative; }
+  .zl-picks {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1600;
+    margin-top: 3px; background: white; border: 1px solid #d1d5db; border-radius: 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.12); max-height: 260px; overflow-y: auto;
+  }
+  .zl-picks.open { display: block; }
+  .zl-pick {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    padding: 6px 10px; font-size: 12px; color: #111827; cursor: pointer;
+  }
+  .zl-pick + .zl-pick { border-top: 1px solid #f3f4f6; }
+  .zl-pick.active, .zl-pick:hover { background: #eff6ff; }
+  .zl-pick-n { color: #9ca3af; font-size: 10px; white-space: nowrap; }
+  .zl-pick-foot { padding: 5px 10px; font-size: 10px; color: #9ca3af; border-top: 1px solid #f3f4f6; }
+  .zl-split { margin-top: 4px; }
+  .zl-split-row {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: #111827; padding: 2px 0;
+  }
+  .zl-split-row .zl-split-n { margin-left: auto; color: #6b7280; font-size: 11px; }
+  .zl-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .zl-chip {
+    font: inherit; font-size: 11px; padding: 2px 7px; cursor: pointer;
+    border: 1px solid #d1d5db; border-left-width: 3px; border-radius: 4px;
+    background: white; color: #374151; font-variant-numeric: tabular-nums;
+  }
+  .zl-chip:hover { background: #f3f4f6; }
 </style>
 </head>
 <body>
@@ -679,14 +707,15 @@
 
     <div class="zl-block">
       <h3>
-        ZIP Lookup
+        ZIP / City Lookup
         <a class="clear-link disabled" id="clearZipLookup">Clear</a>
       </h3>
       <div class="zl-row">
         <input type="text" id="zipLookupInput" class="zl-input"
-               placeholder="Enter a ZIP code…" autocomplete="off"
-               inputmode="numeric" maxlength="5">
+               placeholder="ZIP code or city…" autocomplete="off"
+               maxlength="60" aria-label="ZIP code or city">
         <button type="button" class="zl-go" id="zipLookupGo">Look up</button>
+        <div class="zl-picks" id="zipLookupPicks" role="listbox"></div>
       </div>
       <div class="zl-result" id="zipLookupResult"></div>
     </div>
@@ -1211,6 +1240,8 @@ function applyFiltersAndRender() {
   RADIUS_LAST = toShow;
   updateRadiusStatus();
   updateCampaignNote();
+  // v1.24: keep an open ZIP / City Lookup card in step with the Carrier pills.
+  refreshZipLookupCard();
 }
 
 function rowMatchesFilters(a) {
@@ -1897,12 +1928,11 @@ function renderDemographicsPanel() {
     titleEl.textContent = 'ZIP ' + DEMO_HOVER_ZIP;
     scopeEl.textContent = '— hover';
     if (!r || r.population == null) {
-      grid.innerHTML = '<div class="demo-empty">No Census data for this ZIP</div>' +
-                     renderCarrierShareRows(DEMO_HOVER_ZIP);  // v1.23
+      grid.innerHTML = '<div class="demo-empty">No Census data for this ZIP</div>';
       noteEl.textContent = '';
       return;
     }
-    grid.innerHTML = renderDemoRows(r, false) + renderCarrierShareRows(DEMO_HOVER_ZIP);  // v1.23
+    grid.innerHTML = renderDemoRows(r, false);
     noteEl.textContent = '';
     return;
   }
@@ -1980,7 +2010,8 @@ function renderDemoRows(r, isAggregate) {
 
 // ============================================================================
 // CARRIER SHARE (v1.23, 2026-09-29) — door count + % by carrier for one ZIP.
-// Shown in the ZIP hover tooltip and in the Demographics panel while hovering.
+// Shown in the ZIP hover tooltip and in the ZIP / City Lookup card.
+// v1.24: the Demographics hover panel no longer shows it (Daniel, 2026-09-29).
 //
 // Rules (Daniel's choices, 2026-09-29):
 //   - Only carriers lit in the Carrier filter count. Turn Boost off and Boost
@@ -2030,19 +2061,25 @@ function ensureCarrierZipIndex() {
 }
 
 // Returns { total, rows: [{carrier, count, pct, color}], off: [carriers], anyOn }
-function carrierShareForZip(zip) {
+// for one ZIP or, from v1.24, for a whole city's ZIPs added together.
+function carrierShareForZips(zips) {
   ensureCarrierZipIndex();
-  const off  = CARRIER_WIRELESS_LIST.filter(c => !FILTERS.carriers.has(c));
+  const off   = CARRIER_WIRELESS_LIST.filter(c => !FILTERS.carriers.has(c));
   const anyOn = CARRIER_WIRELESS_LIST.some(c => FILTERS.carriers.has(c));
-  const m = CARRIER_ZIP_INDEX.get(zip5(zip));
-  const rows = [];
-  let total = 0;
-  if (m) {
+  const counts = new Map();
+  for (const z of new Set(zips.map(zip5))) {
+    const m = CARRIER_ZIP_INDEX.get(z);
+    if (!m) continue;
     for (const [carrier, count] of m) {
       if (!FILTERS.carriers.has(carrier)) continue;
-      rows.push({ carrier, count, pct: 0, color: pinColor({ industry: carrier }) });
-      total += count;
+      counts.set(carrier, (counts.get(carrier) || 0) + count);
     }
+  }
+  const rows = [];
+  let total = 0;
+  for (const [carrier, count] of counts) {
+    rows.push({ carrier, count, pct: 0, color: pinColor({ industry: carrier }) });
+    total += count;
   }
   // Most doors first; ties alphabetical so the order never jumps around.
   rows.sort((x, y) => (y.count - x.count) || x.carrier.localeCompare(y.carrier));
@@ -2058,6 +2095,8 @@ function carrierShareForZip(zip) {
   return { total, rows, off, anyOn };
 }
 
+function carrierShareForZip(zip) { return carrierShareForZips([zip]); }
+
 // One line for the ZIP hover tooltip.
 function carrierShareTooltipLine(zip) {
   const s = carrierShareForZip(zip);
@@ -2069,16 +2108,16 @@ function carrierShareTooltipLine(zip) {
   ).join(' · ');
 }
 
-// Section for the Demographics panel in hover mode.
-function renderCarrierShareRows(zip) {
-  const s = carrierShareForZip(zip);
+// "Carrier share (doors)" section for the ZIP / City Lookup card. `s` comes
+// from carrierShareForZips(); `where` finishes the empty message.
+function renderCarrierShareBlock(s, where) {
   const out = ['<div class="demo-row demo-section-header">Carrier share (doors)</div>'];
   if (!s.anyOn) {
     out.push('<div class="demo-empty">No carriers selected in the Carrier filter</div>');
     return out.join('');
   }
   if (!s.total) {
-    out.push('<div class="demo-empty">No carrier doors on file for this ZIP</div>');
+    out.push('<div class="demo-empty">No carrier doors on file ' + escapeHtml(where) + '</div>');
   } else {
     const segs = s.rows.map(r =>
       `<span class="demo-race-bar-seg" style="width:${r.count * 100 / s.total}%;background:${r.color}" ` +
@@ -2613,95 +2652,394 @@ function zipLookupDemoBlock(zip) {
   return '<div class="zl-demo">' + renderDemoRows(r, false) + '</div>';
 }
 
+// ============================================================================
+// CITY LOOKUP (v1.24, 2026-09-29) — the ZIP Lookup box also takes a city.
+//
+// - Digits only  -> ZIP, exactly as before (auto-answers at 5 digits).
+// - Any letter   -> city. From 3 letters a pick list opens; each row is one
+//   city + state, because 249 city names exist in more than one state
+//   (Long Beach CA / NY, Norfolk NY / VA, Orange CA / NJ).
+// - "City, ST" narrows the list to one state.
+//
+// A city's ZIPs are the ZIPs whose `city` in zip_layer.geojson matches — the
+// USPS city name. So "New York" is Manhattan only; Brooklyn, Bronx and
+// neighbourhood names like North Hollywood are cities of their own. The 728
+// PO-box ZIPs with no boundary have no city, so city search cannot find them;
+// ZIP search still does.
+//
+// Doors are counted by the row's ZIP (same rule as the tooltip), never by the
+// city typed on the Sheet row.
+//
+// Only 4 of 3,494 cities were split between managers when this was built:
+// Los Angeles, Anaheim, Santa Ana and Orange (all CA). The card lists every
+// owner with its ZIP count, so a split can never be hidden.
+//
+// The open card is re-drawn (no zoom) whenever applyFiltersAndRender() runs,
+// so toggling a Carrier pill updates its carrier share.
+// ============================================================================
+var ZL_STATE = null;          // { kind: 'zip', zip } | { kind: 'city', key } | null
+var CITY_INDEX = null;        // Map "long beach|CA" -> { key, city, state, zips[], features[] }
+var CITY_INDEX_SRC = null;    // the ZIP_LAYER_DATA it was built from
+var ZL_PICKS = [];            // cities currently shown in the pick list
+var ZL_PICK_ACTIVE = -1;      // highlighted row in the pick list
+
+function normCity(s) {
+  return String(s || '').toLowerCase().replace(/[.'’]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function ensureCityIndex() {
+  if (!ZIP_LAYER_DATA) return false;
+  if (CITY_INDEX && CITY_INDEX_SRC === ZIP_LAYER_DATA) return true;
+  const idx = new Map();
+  for (const f of (ZIP_LAYER_DATA.features || [])) {
+    const p = f.properties || {};
+    const city = (p.city || '').trim();
+    const zip = zip5(p.zip);
+    if (!city || !zip) continue;
+    const state = (p.state || '').trim().toUpperCase();
+    const key = normCity(city) + '|' + state;
+    let c = idx.get(key);
+    if (!c) { c = { key, city, state, norm: normCity(city), zips: [], features: [] }; idx.set(key, c); }
+    if (!c.zips.includes(zip)) { c.zips.push(zip); c.features.push(f); }
+  }
+  for (const c of idx.values()) c.zips.sort();
+  CITY_INDEX = idx;
+  CITY_INDEX_SRC = ZIP_LAYER_DATA;
+  return true;
+}
+
+// Ranked city matches for typed text. Returns { list, total }.
+// Rank: exact name (0) > name starts with it (1) > a later word starts with
+// it (2) > contains it (3); then more ZIPs first, then A-Z.
+function findCities(text) {
+  if (!ensureCityIndex()) return { list: [], total: 0 };
+  let q = String(text || '');
+  let st = '';
+  const comma = q.lastIndexOf(',');
+  if (comma >= 0) {
+    st = q.slice(comma + 1).trim().toUpperCase();
+    q = q.slice(0, comma);
+  }
+  q = normCity(q);
+  if (!q) return { list: [], total: 0 };
+  const hits = [];
+  for (const c of CITY_INDEX.values()) {
+    if (st && !c.state.startsWith(st)) continue;
+    let rank;
+    if (c.norm === q) rank = 0;
+    else if (c.norm.startsWith(q)) rank = 1;
+    else if (c.norm.split(' ').some(w => w.startsWith(q))) rank = 2;
+    else if (c.norm.includes(q)) rank = 3;
+    else continue;
+    hits.push({ c, rank });
+  }
+  hits.sort((x, y) => (x.rank - y.rank) || (y.c.zips.length - x.c.zips.length) ||
+                      x.c.city.localeCompare(y.c.city) || x.c.state.localeCompare(y.c.state));
+  return { list: hits.slice(0, 8).map(h => h.c), total: hits.length };
+}
+
+function hideCityPicks() {
+  const box = document.getElementById('zipLookupPicks');
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+  ZL_PICKS = [];
+  ZL_PICK_ACTIVE = -1;
+}
+
+function showCityPicks(text) {
+  const box = document.getElementById('zipLookupPicks');
+  if (!box) return;
+  const res = findCities(text);
+  ZL_PICKS = res.list;
+  ZL_PICK_ACTIVE = res.list.length ? 0 : -1;
+  if (!res.list.length) { hideCityPicks(); return; }
+  box.innerHTML = res.list.map((c, i) =>
+    `<div class="zl-pick${i === 0 ? ' active' : ''}" role="option" data-i="${i}">` +
+    `<span>${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span>` +
+    `<span class="zl-pick-n">${c.zips.length} ZIP${c.zips.length === 1 ? '' : 's'}</span></div>`
+  ).join('') +
+    (res.total > res.list.length
+      ? `<div class="zl-pick-foot">Showing ${res.list.length} of ${res.total}. Keep typing to narrow.</div>` : '');
+  box.classList.add('open');
+}
+
+function setActivePick(i) {
+  const box = document.getElementById('zipLookupPicks');
+  if (!box || !ZL_PICKS.length) return;
+  ZL_PICK_ACTIVE = (i + ZL_PICKS.length) % ZL_PICKS.length;
+  box.querySelectorAll('.zl-pick').forEach((el, k) => el.classList.toggle('active', k === ZL_PICK_ACTIVE));
+  const el = box.querySelector('.zl-pick.active');
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+}
+
+function pickCity(c) {
+  const input = document.getElementById('zipLookupInput');
+  if (input) input.value = c.city + ', ' + c.state;
+  hideCityPicks();
+  runCityLookup(c.key);
+}
+
 function clearZipLookup() {
   ZIP_LOOKUP_LAYER.clearLayers();
+  ZL_STATE = null;
+  hideCityPicks();
   const out  = document.getElementById('zipLookupResult');
   const link = document.getElementById('clearZipLookup');
   if (out)  { out.innerHTML = ''; out.className = 'zl-result'; }
   if (link) link.classList.add('disabled');
 }
 
-function runZipLookup() {
-  const input = document.getElementById('zipLookupInput');
-  const out   = document.getElementById('zipLookupResult');
-  const link  = document.getElementById('clearZipLookup');
-  if (!input || !out) return;
-
+// Outline + zoom. Shared by ZIP and city results. Never called on a refresh.
+function zlOutlineAndZoom(features, colorFor) {
   ZIP_LOOKUP_LAYER.clearLayers();
-  const digits = (input.value || '').replace(/\D/g, '');
-
-  if (!digits) { clearZipLookup(); return; }
-  if (link) link.classList.remove('disabled');
-
-  // Accept 4 digits and zero-pad: a NJ rep typing 7001 means 07001.
-  if (digits.length < 4) {
-    out.className = 'zl-result zl-hint';
-    out.textContent = 'Enter a 5-digit ZIP code.';
-    return;
+  if (!features.length) return;
+  const layer = L.geoJSON({ type: 'FeatureCollection', features }, {
+    style: f => ({ color: '#eab308', weight: 3, fillColor: colorFor(f), fillOpacity: 0.25 }),
+  });
+  layer.addTo(ZIP_LOOKUP_LAYER);
+  if (typeof layer.bringToFront === 'function') layer.bringToFront();
+  try {
+    map.fitBounds(layer.getBounds(), { maxZoom: 13, padding: [40, 40] });
+  } catch (e) {
+    console.warn('ZIP Lookup: could not fit bounds', e);
   }
+}
 
-  const r = lookupZipOwner(digits);
+// Card HTML for one ZIP. Pure: reads data, draws nothing on the map.
+function zipCardHtml(r) {
   const zipTxt = escapeHtml(r.zip);
-
   if (r.status === 'unmapped') {
-    out.className = 'zl-result zl-unmapped';
-    out.innerHTML =
-      '<div class="zl-zip">ZIP ' + zipTxt + '</div>' +
-      '<div class="zl-owner">Not Mapped</div>' +
-      '<div class="zl-sub">Outside every market this map covers.</div>';
-    return;
+    return {
+      cls: 'zl-result zl-unmapped',
+      html: '<div class="zl-zip">ZIP ' + zipTxt + '</div>' +
+            '<div class="zl-owner">Not Mapped</div>' +
+            '<div class="zl-sub">Outside every market this map covers.</div>',
+    };
   }
-
   const label = r.zone ? (r.zone.label || r.zoneId) : (r.zoneId || '');
   const color = (r.zone && r.zone.color) || '#9ca3af';
-
-  out.className = 'zl-result ' + (r.status === 'open' ? 'zl-open' : 'zl-owned');
-  out.innerHTML =
+  let html =
     '<div class="zl-zip">ZIP ' + zipTxt + '</div>' +
     '<div class="zl-owner">' + escapeHtml(r.owner) + '</div>' +
     (label
       ? '<div class="zl-sub"><span class="zl-dot" style="background:' + escapeHtml(color) + '"></span>' +
         escapeHtml(label) + '</div>'
       : '') +
+    '<div class="zl-demo">' + renderCarrierShareBlock(carrierShareForZip(r.zip), 'for this ZIP') + '</div>' +
     zipLookupDemoBlock(r.zip);
-
-  if (r.feature) {
-    const layer = L.geoJSON(r.feature, {
-      style: { color: '#eab308', weight: 3, fillColor: color, fillOpacity: 0.25 },
-    });
-    layer.addTo(ZIP_LOOKUP_LAYER);
-    if (typeof layer.bringToFront === 'function') layer.bringToFront();
-    try {
-      map.fitBounds(layer.getBounds(), { maxZoom: 13, padding: [40, 40] });
-    } catch (e) {
-      console.warn('ZIP Lookup: could not fit bounds for ' + r.zip, e);
-    }
-  } else {
+  if (!r.feature) {
     // Owned, but a PO-box-only ZIP with no ZCTA shape — say so rather than
     // leaving the rep wondering why the map did not move.
-    out.innerHTML += '<div class="zl-note">No ZIP boundary on file, so the map did not move. ' +
-                     'PO-box-only ZIPs have no shape to draw.</div>';
+    html += '<div class="zl-note">No ZIP boundary on file, so the map did not move. ' +
+            'PO-box-only ZIPs have no shape to draw.</div>';
   }
+  return { cls: 'zl-result ' + (r.status === 'open' ? 'zl-open' : 'zl-owned'), html };
+}
+
+// Card HTML for one city. Pure: reads data, draws nothing on the map.
+function cityCardHtml(c) {
+  // Owner of every ZIP, grouped. "Open" is kept as its own group.
+  const groups = new Map();
+  for (const z of c.zips) {
+    const r = lookupZipOwner(z);
+    const name = r.owner || 'Open';
+    let g = groups.get(name);
+    if (!g) {
+      g = { name, open: r.status !== 'owned', color: (r.zone && r.zone.color) || '#9ca3af',
+            labels: new Set(), n: 0 };
+      groups.set(name, g);
+    }
+    g.n++;
+    if (r.zone) g.labels.add(r.zone.label || r.zoneId);
+  }
+  const owners = Array.from(groups.values()).sort((x, y) => (y.n - x.n) || x.name.localeCompare(y.name));
+  const allOpen = owners.every(g => g.open);
+  const n = c.zips.length;
+  let html = '<div class="zl-zip">' + escapeHtml(c.city) + ', ' + escapeHtml(c.state) +
+             ' · ' + n + ' ZIP' + (n === 1 ? '' : 's') + '</div>';
+  if (owners.length === 1) {
+    const g = owners[0];
+    const lbl = Array.from(g.labels).join(', ');
+    html += '<div class="zl-owner">' + escapeHtml(g.name) + '</div>' +
+            (lbl ? '<div class="zl-sub"><span class="zl-dot" style="background:' + escapeHtml(g.color) +
+                   '"></span>' + escapeHtml(lbl) + '</div>' : '');
+  } else {
+    html += '<div class="zl-owner">Split · ' + owners.length + ' owners</div><div class="zl-split">' +
+      owners.map(g =>
+        '<div class="zl-split-row"><span class="zl-dot" style="background:' + escapeHtml(g.color) + '"></span>' +
+        escapeHtml(g.name) + '<span class="zl-split-n">' + g.n + ' ZIP' + (g.n === 1 ? '' : 's') + '</span></div>'
+      ).join('') + '</div>';
+  }
+
+  html += '<div class="zl-demo">' + renderCarrierShareBlock(carrierShareForZips(c.zips), 'in this city') + '</div>';
+
+  // Census totals over the city's ZIPs — same math as the sidebar panel.
+  if (!ZIP_DEMOGRAPHICS) {
+    html += '<div class="zl-demo"><div class="demo-empty">Loading Census data…</div></div>';
+  } else {
+    const agg = aggregateDemographics(c.zips);
+    if (!agg.has_data_count) {
+      html += '<div class="zl-demo"><div class="demo-empty">No Census data for these ZIPs</div></div>';
+    } else {
+      html += '<div class="zl-demo">' + renderDemoRows(agg, true) +
+              '<div class="cs-note">Combined over ' + agg.has_data_count + ' of ' + n + ' ZIPs. ' +
+              'Income and density are population-weighted.</div></div>';
+    }
+  }
+
+  // Every ZIP as a chip; left border = the zone colour. Click opens that ZIP.
+  html += '<div class="zl-demo"><div class="demo-row demo-section-header">ZIPs</div><div class="zl-chips">' +
+    c.zips.map(z => {
+      const r = lookupZipOwner(z);
+      const col = (r.zone && r.zone.color) || '#9ca3af';
+      return '<button type="button" class="zl-chip" data-zip="' + escapeHtml(z) + '" style="border-left-color:' +
+             escapeHtml(col) + '" title="' + escapeHtml(r.owner || 'Open') + '">' + escapeHtml(z) + '</button>';
+    }).join('') + '</div></div>';
+
+  return { cls: 'zl-result ' + (allOpen ? 'zl-open' : 'zl-owned'), html };
+}
+
+function runCityLookup(key) {
+  const out  = document.getElementById('zipLookupResult');
+  const link = document.getElementById('clearZipLookup');
+  if (!out || !ensureCityIndex()) return;
+  const c = CITY_INDEX.get(key);
+  if (!c) return;
+  if (link) link.classList.remove('disabled');
+  ZL_STATE = { kind: 'city', key };
+  const card = cityCardHtml(c);
+  out.className = card.cls;
+  out.innerHTML = card.html;
+  zlOutlineAndZoom(c.features, f => {
+    const r = lookupZipOwner(f.properties.zip);
+    return (r.zone && r.zone.color) || '#9ca3af';
+  });
+}
+
+function runZipCode(digits) {
+  const out  = document.getElementById('zipLookupResult');
+  const link = document.getElementById('clearZipLookup');
+  if (!out) return;
+  if (link) link.classList.remove('disabled');
+  ZIP_LOOKUP_LAYER.clearLayers();
+  // Accept 4 digits and zero-pad: a NJ rep typing 7001 means 07001.
+  if (digits.length < 4) {
+    ZL_STATE = null;
+    out.className = 'zl-result zl-hint';
+    out.textContent = 'Enter a 5-digit ZIP code.';
+    return;
+  }
+  const r = lookupZipOwner(digits);
+  ZL_STATE = r.status === 'unmapped' ? null : { kind: 'zip', zip: r.zip };
+  const card = zipCardHtml(r);
+  out.className = card.cls;
+  out.innerHTML = card.html;
+  if (r.feature) {
+    const color = (r.zone && r.zone.color) || '#9ca3af';
+    zlOutlineAndZoom([r.feature], () => color);
+  }
+}
+
+// Look up button / Enter. Digits -> ZIP. Letters -> the highlighted pick, or
+// the best match if the list is closed.
+function runZipLookup() {
+  const input = document.getElementById('zipLookupInput');
+  const out   = document.getElementById('zipLookupResult');
+  if (!input || !out) return;
+  const raw = (input.value || '').trim();
+  if (!raw) { clearZipLookup(); return; }
+
+  if (!/[a-z]/i.test(raw)) {
+    hideCityPicks();
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) { clearZipLookup(); return; }
+    runZipCode(digits);
+    return;
+  }
+
+  // City
+  if (ZL_PICKS.length && ZL_PICK_ACTIVE >= 0) { pickCity(ZL_PICKS[ZL_PICK_ACTIVE]); return; }
+  const link = document.getElementById('clearZipLookup');
+  if (link) link.classList.remove('disabled');
+  if (!ensureCityIndex()) {
+    out.className = 'zl-result zl-hint';
+    out.textContent = 'ZIP boundaries are still loading. Try again in a moment.';
+    return;
+  }
+  const res = findCities(raw);
+  if (res.list.length) { pickCity(res.list[0]); return; }
+  ZIP_LOOKUP_LAYER.clearLayers();
+  ZL_STATE = null;
+  out.className = 'zl-result zl-hint';
+  out.textContent = 'No city by that name on the map.';
+}
+
+// Called at the end of applyFiltersAndRender(): re-draw the open card so its
+// carrier share follows the Carrier pills. Card only — no zoom, no outline.
+function refreshZipLookupCard() {
+  if (!ZL_STATE) return;
+  const out = document.getElementById('zipLookupResult');
+  if (!out) return;
+  let card = null;
+  if (ZL_STATE.kind === 'zip') {
+    card = zipCardHtml(lookupZipOwner(ZL_STATE.zip));
+  } else if (ZL_STATE.kind === 'city' && ensureCityIndex() && CITY_INDEX.get(ZL_STATE.key)) {
+    card = cityCardHtml(CITY_INDEX.get(ZL_STATE.key));
+  }
+  if (card) { out.className = card.cls; out.innerHTML = card.html; }
 }
 
 (function wireZipLookup() {
   const input = document.getElementById('zipLookupInput');
   const go    = document.getElementById('zipLookupGo');
   const link  = document.getElementById('clearZipLookup');
+  const out   = document.getElementById('zipLookupResult');
+  const picks = document.getElementById('zipLookupPicks');
   if (!input || !go || !link) return;
 
   ZIP_LOOKUP_LAYER.addTo(map);
 
-  // Auto-answer the moment a full ZIP is typed; no need to press anything.
   input.addEventListener('input', () => {
-    const d = (input.value || '').replace(/\D/g, '');
-    if (!d) { clearZipLookup(); return; }
+    const raw = (input.value || '').trim();
+    if (!raw) { clearZipLookup(); return; }
+    if (/[a-z]/i.test(raw)) {
+      // City: open the pick list from 3 letters. Nothing runs until a pick.
+      if (raw.replace(/[^a-z]/gi, '').length >= 3) showCityPicks(raw);
+      else hideCityPicks();
+      return;
+    }
+    // ZIP: auto-answer the moment a full ZIP is typed.
+    hideCityPicks();
+    const d = raw.replace(/\D/g, '');
     if (d.length === 5) runZipLookup();
   });
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')       { e.preventDefault(); runZipLookup(); }
-    else if (e.key === 'Escape') { input.value = ''; clearZipLookup(); }
+    const open = picks && picks.classList.contains('open');
+    if (e.key === 'ArrowDown' && open)     { e.preventDefault(); setActivePick(ZL_PICK_ACTIVE + 1); }
+    else if (e.key === 'ArrowUp' && open)  { e.preventDefault(); setActivePick(ZL_PICK_ACTIVE - 1); }
+    else if (e.key === 'Enter')            { e.preventDefault(); runZipLookup(); }
+    else if (e.key === 'Escape') {
+      if (open) hideCityPicks();
+      else { input.value = ''; clearZipLookup(); }
+    }
+  });
+
+  // mousedown, not click, so the pick lands before the input's blur closes the list.
+  if (picks) picks.addEventListener('mousedown', (e) => {
+    const row = e.target.closest('.zl-pick');
+    if (!row) return;
+    e.preventDefault();
+    const c = ZL_PICKS[Number(row.dataset.i)];
+    if (c) pickCity(c);
+  });
+  input.addEventListener('blur', () => setTimeout(hideCityPicks, 150));
+
+  // ZIP chips on a city card open that ZIP's card.
+  if (out) out.addEventListener('click', (e) => {
+    const chip = e.target.closest('.zl-chip');
+    if (!chip) return;
+    input.value = chip.dataset.zip;
+    runZipLookup();
   });
 
   go.addEventListener('click', runZipLookup);
