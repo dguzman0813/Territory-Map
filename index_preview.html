@@ -253,6 +253,37 @@
     font-size: 11px; color: #6b7280; margin-top: 8px; line-height: 1.4;
   }
   .datafilter-status.active { color: #ca8a04; font-weight: 500; }
+  /* v1.26: several filter lines (AND) + carrier share fields */
+  .datafilter-rows { display: flex; flex-direction: column; }
+  .datafilter-and {
+    font-size: 10px; font-weight: 600; color: #9ca3af; letter-spacing: .08em;
+    text-align: center; margin: 4px 0;
+  }
+  .datafilter-row { position: relative; }
+  .datafilter-row.has-remove { padding-right: 32px; }
+  .datafilter-remove {
+    position: absolute; top: 9px; right: 6px; width: 22px; height: 22px;
+    border: none; background: none; color: #9ca3af; font-size: 16px; line-height: 22px;
+    cursor: pointer; border-radius: 4px; padding: 0; font-family: inherit;
+  }
+  .datafilter-remove:hover { color: #dc2626; background: #fee2e2; }
+  .datafilter-add {
+    display: inline-block; margin-top: 8px; font-size: 11px; font-weight: 500;
+    color: #2563eb; cursor: pointer; background: none; border: none; padding: 0;
+    font-family: inherit;
+  }
+  .datafilter-add:hover { text-decoration: underline; }
+  .datafilter-add:disabled { color: #d1d5db; cursor: default; text-decoration: none; }
+  .datafilter-status .df-line { display: block; }
+  .datafilter-status .df-line + .df-line { margin-top: 3px; }
+  .datafilter-status .df-nodoors { color: #475569; }
+  .datafilter-status .df-warn { color: #b45309; }
+  .df-swatch {
+    display: inline-block; width: 14px; height: 10px; vertical-align: -1px;
+    margin-right: 5px; border-radius: 2px; box-sizing: border-box;
+  }
+  .df-swatch.match   { border: 2px solid #eab308; background: rgba(8,145,178,.35); }
+  .df-swatch.nodoors { border: 1.5px dashed #475569; background: rgba(148,163,184,.35); }
 
   /* ---- Filters (sidebar) ---- */
   .filters { margin-bottom: 24px; }
@@ -772,30 +803,9 @@
         Filter ZIPs by data
         <a class="clear-link disabled" id="clearDataFilter">Clear</a>
       </h3>
-      <div class="datafilter-row">
-        <select id="dataFilterField" class="datafilter-select">
-          <option value="">— select field —</option>
-          <option value="median_household_income">Median income</option>
-          <option value="population">Population</option>
-          <option value="population_density">Density (per mi²)</option>
-          <option value="pct_hispanic">% Hispanic</option>
-          <option value="pct_white_nh">% White (non-Hisp)</option>
-          <option value="pct_black_nh">% Black (non-Hisp)</option>
-          <option value="pct_asian_nh">% Asian (non-Hisp)</option>
-          <option value="pct_other_nh">% Other (non-Hisp)</option>
-        </select>
-        <select id="dataFilterOp" class="datafilter-select datafilter-op" disabled>
-          <option value="gt">&gt; (greater than)</option>
-          <option value="lt">&lt; (less than)</option>
-          <option value="between">between</option>
-        </select>
-        <div class="datafilter-values">
-          <input type="number" id="dataFilterValue" class="datafilter-input"
-                 placeholder="value" disabled inputmode="decimal">
-          <input type="number" id="dataFilterValue2" class="datafilter-input datafilter-input-2"
-                 placeholder="and…" disabled inputmode="decimal" style="display:none">
-        </div>
-      </div>
+      <!-- v1.26: filter lines are built by renderDataFilterRows() -->
+      <div class="datafilter-rows" id="dataFilterRows"></div>
+      <button type="button" class="datafilter-add" id="addDataFilter">+ Add another filter</button>
       <div class="datafilter-status" id="dataFilterStatus"></div>
     </div>
 
@@ -935,93 +945,187 @@ const FILTERS = {
   pipelines: new Set(),      // HubSpot pipeline
 };
 
-// Day 2+: Census data filter. When `field` is null the filter is inactive
-// and ZIPs render normally. When active, ZIPs matching the predicate get a
-// gold highlight; non-matching ZIPs fade to dim grey, and pins on
-// non-matching ZIPs are hidden.
-const DATA_FILTER = {
-  field: null,         // one of: median_household_income, population,
-                       // population_density, pct_hispanic, pct_white_nh,
-                       // pct_black_nh, pct_asian_nh, pct_other_nh
-  operator: 'gt',      // 'gt' | 'lt' | 'between'
-  value: null,         // primary numeric threshold
-  value2: null,        // upper bound when operator === 'between'
+// Data filter (Day 2+, reworked v1.26 2026-09-29).
+// One or more filter lines, ANDed together. Each line is a Census field or,
+// from v1.26, a carrier's share of the doors in the ZIP ("Cricket share < 10").
+// Half-typed lines (field picked, no value yet) are ignored until complete.
+//
+// Every ZIP lands in one of three states:
+//   'match'   passes every complete line -> gold ring, pins shown.
+//   'nodoors' passes every Census line, but has no carrier doors, so a
+//             carrier-share line cannot be worked out -> dashed grey outline,
+//             pins shown (only Non-Wireless Investor pins can be there).
+//             Daniel, 2026-09-29: "less importance but still noticeable".
+//   'fail'    fails any line, or has no Census value for a Census line
+//             -> dim grey, pins hidden.
+//
+// Carrier share uses the same numbers as the ZIP hover tooltip
+// (carrierShareForZip): lit carrier pills only, Non-Wireless Investor never
+// counts, and the whole-number % the tooltip shows is what gets compared, so
+// "< 10" can never disagree with the tooltip. No minimum door count.
+const DATA_FILTER_MAX_ROWS = 5;
+const DATA_FILTER_SHARE_PREFIX = 'share:';
+const DATA_FILTERS = [];   // one { field, operator, value, value2 } per line on screen
+
+const DATA_FILTER_FIELD_LABELS = {
+  median_household_income: 'income',
+  population:              'population',
+  population_density:      'density',
+  pct_hispanic:            '% Hispanic',
+  pct_white_nh:            '% White',
+  pct_black_nh:            '% Black',
+  pct_asian_nh:            '% Asian',
+  pct_other_nh:            '% Other',
 };
 
-// Is the data filter actively narrowing the map?
-// Returns true only when we have a field, an operator, and value(s) that
-// produce a meaningful predicate. Half-typed states (field selected but no
-// value yet) count as inactive — better than confusing the user with a
-// momentarily-empty map while they're still typing.
-function isDataFilterActive() {
-  if (!DATA_FILTER.field) return false;
-  if (DATA_FILTER.value == null || isNaN(DATA_FILTER.value)) return false;
-  if (DATA_FILTER.operator === 'between') {
-    if (DATA_FILTER.value2 == null || isNaN(DATA_FILTER.value2)) return false;
-  }
+function newDataFilterLine() {
+  return { field: null, operator: 'gt', value: null, value2: null };
+}
+function isShareField(field) {
+  return typeof field === 'string' && field.indexOf(DATA_FILTER_SHARE_PREFIX) === 0;
+}
+function shareFieldCarrier(field) {
+  return String(field || '').slice(DATA_FILTER_SHARE_PREFIX.length);
+}
+
+function dataFilterLineComplete(f) {
+  if (!f || !f.field) return false;
+  if (f.value == null || isNaN(f.value)) return false;
+  if (f.operator === 'between' && (f.value2 == null || isNaN(f.value2))) return false;
   return true;
 }
 
-// Does a given ZIP code match the active data filter?
-// Returns true if no filter is active. Returns false if filter is active but
-// the ZIP has no value for the selected field (null Census data).
-function zipMatchesDataFilter(zip) {
-  if (!isDataFilterActive()) return true;
-  if (!ZIP_DEMOGRAPHICS) return false; // filter on but no data — match nothing
-  const rec = ZIP_DEMOGRAPHICS[zip];
-  if (!rec) return false;
-  const v = rec[DATA_FILTER.field];
-  if (v == null) return false;
-  if (DATA_FILTER.operator === 'gt') return v > DATA_FILTER.value;
-  if (DATA_FILTER.operator === 'lt') return v < DATA_FILTER.value;
-  if (DATA_FILTER.operator === 'between') {
-    const lo = Math.min(DATA_FILTER.value, DATA_FILTER.value2);
-    const hi = Math.max(DATA_FILTER.value, DATA_FILTER.value2);
+// A carrier-share line whose carrier is switched off in the Carrier pills is
+// PAUSED (ignored, with a note under the block). With that carrier off it
+// would read 0% everywhere, which is not a real answer.
+function dataFilterLinePaused(f) {
+  return isShareField(f.field) && !FILTERS.carriers.has(shareFieldCarrier(f.field));
+}
+
+function activeDataFilterLines() {
+  return DATA_FILTERS.filter(f => dataFilterLineComplete(f) && !dataFilterLinePaused(f));
+}
+
+// Is the data filter actively narrowing the map?
+function isDataFilterActive() { return activeDataFilterLines().length > 0; }
+
+function dataFilterUsesCarrierShare() {
+  return activeDataFilterLines().some(f => isShareField(f.field));
+}
+
+function compareDataFilterValue(v, f) {
+  if (f.operator === 'gt') return v > f.value;
+  if (f.operator === 'lt') return v < f.value;
+  if (f.operator === 'between') {
+    const lo = Math.min(f.value, f.value2);
+    const hi = Math.max(f.value, f.value2);
     return v >= lo && v <= hi;
   }
   return false;
 }
 
-// Format the filter for the human-readable status / scope display.
-// Example outputs: "income > $100,000", "% Hispanic between 20% and 50%".
-function describeDataFilter() {
-  if (!isDataFilterActive()) return '';
-  const f = DATA_FILTER.field;
-  // Label for the field
-  const fieldLabels = {
-    median_household_income: 'income',
-    population:              'population',
-    population_density:      'density',
-    pct_hispanic:            '% Hispanic',
-    pct_white_nh:            '% White',
-    pct_black_nh:            '% Black',
-    pct_asian_nh:            '% Asian',
-    pct_other_nh:            '% Other',
-  };
-  const label = fieldLabels[f] || f;
-  // Format the value depending on field
+// Per-ZIP answer cache. Thrown away whenever the lines, the lit carriers or
+// the loaded data change, so ~10,000 pins and ~4,400 polygons share one
+// answer per ZIP instead of each redoing the carrier split.
+let DF_CACHE = new Map();
+let DF_CACHE_KEY = null;
+let DF_CACHE_ADDR = null;
+let DF_CACHE_DEMO = null;
+
+function dataFilterKey(lines) {
+  return JSON.stringify(lines.map(f => [f.field, f.operator, f.value, f.value2])) +
+         '|' + Array.from(FILTERS.carriers).sort().join(',');
+}
+
+// 'match' | 'nodoors' | 'fail'. Always 'match' when no line is active.
+function zipDataFilterState(zip) {
+  const lines = activeDataFilterLines();
+  if (!lines.length) return 'match';
+  const z = zip5(zip);
+  if (!z) return 'fail';
+  const key = dataFilterKey(lines);
+  if (key !== DF_CACHE_KEY || DF_CACHE_ADDR !== ADDRESSES || DF_CACHE_DEMO !== ZIP_DEMOGRAPHICS) {
+    DF_CACHE = new Map();
+    DF_CACHE_KEY = key; DF_CACHE_ADDR = ADDRESSES; DF_CACHE_DEMO = ZIP_DEMOGRAPHICS;
+  }
+  if (DF_CACHE.has(z)) return DF_CACHE.get(z);
+  let state = 'match';
+  let share = null;   // worked out once per ZIP, only if a share line needs it
+  for (const f of lines) {
+    if (isShareField(f.field)) {
+      if (!share) share = carrierShareForZip(z);
+      if (!share.total) { state = 'nodoors'; continue; }
+      const row = share.rows.find(r => r.carrier === shareFieldCarrier(f.field));
+      if (!compareDataFilterValue(row ? row.pct : 0, f)) { state = 'fail'; break; }
+    } else {
+      const rec = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[z];
+      const v = rec ? rec[f.field] : null;
+      if (v == null || !compareDataFilterValue(v, f)) { state = 'fail'; break; }
+    }
+  }
+  DF_CACHE.set(z, state);
+  return state;
+}
+
+// Full match only. Used by the ZIP shading and the Demographics scope.
+function zipMatchesDataFilter(zip) { return zipDataFilterState(zip) === 'match'; }
+
+// Pins are shown on 'match' AND 'nodoors' ZIPs, hidden on 'fail'. A door is
+// judged by the same ZIP it is counted in for carrier share: the row's `zip`
+// (zero-padded, so NJ "7024" finds 07024), else a ZIP at the end of the address.
+function rowPassesDataFilter(a) {
+  if (!isDataFilterActive()) return true;
+  return zipDataFilterState(carrierShareZip(a)) !== 'fail';
+}
+
+function describeDataFilterLine(f) {
+  const label = isShareField(f.field)
+    ? shareFieldCarrier(f.field) + ' share'
+    : (DATA_FILTER_FIELD_LABELS[f.field] || f.field);
   const fmt = (n) => {
-    if (f === 'median_household_income') return '$' + Math.round(n).toLocaleString();
-    if (f === 'population')              return Math.round(n).toLocaleString();
-    if (f === 'population_density')      return Math.round(n).toLocaleString() + '/mi²';
+    if (f.field === 'median_household_income') return '$' + Math.round(n).toLocaleString();
+    if (f.field === 'population')              return Math.round(n).toLocaleString();
+    if (f.field === 'population_density')      return Math.round(n).toLocaleString() + '/mi²';
     return n + '%';
   };
-  if (DATA_FILTER.operator === 'gt')      return `${label} > ${fmt(DATA_FILTER.value)}`;
-  if (DATA_FILTER.operator === 'lt')      return `${label} < ${fmt(DATA_FILTER.value)}`;
-  if (DATA_FILTER.operator === 'between') return `${label} between ${fmt(DATA_FILTER.value)} and ${fmt(DATA_FILTER.value2)}`;
+  if (f.operator === 'gt')      return `${label} > ${fmt(f.value)}`;
+  if (f.operator === 'lt')      return `${label} < ${fmt(f.value)}`;
+  if (f.operator === 'between') return `${label} between ${fmt(f.value)} and ${fmt(f.value2)}`;
   return '';
 }
 
-// Build a Set of ZIPs that match the current data filter. Used to compose
-// with the pin filter — a pin's zip must be in this set, otherwise the pin
-// is hidden alongside the dim-grey ZIP polygon.
-function getDataFilterMatchingZips() {
-  if (!isDataFilterActive() || !ZIP_DEMOGRAPHICS) return null;  // null = no filter
-  const matches = new Set();
-  for (const zip of Object.keys(ZIP_DEMOGRAPHICS)) {
-    if (zipMatchesDataFilter(zip)) matches.add(zip);
+// Human-readable filter for the status / scope display.
+// Example: "income > $50,000 & Cricket share < 10%".
+function describeDataFilter() {
+  return activeDataFilterLines().map(describeDataFilterLine).filter(Boolean).join(' & ');
+}
+
+// Every ZIP the filter can judge: Census ZIPs, ZIP polygons, ZIPs with doors.
+function dataFilterZipUniverse() {
+  const all = new Set();
+  if (ZIP_DEMOGRAPHICS) for (const z of Object.keys(ZIP_DEMOGRAPHICS)) all.add(z);
+  if (ZIP_LAYER_DATA) {
+    for (const ft of (ZIP_LAYER_DATA.features || [])) {
+      const z = zip5(ft.properties && ft.properties.zip);
+      if (z) all.add(z);
+    }
   }
-  return matches;
+  if (dataFilterUsesCarrierShare()) {
+    ensureCarrierZipIndex();
+    for (const z of CARRIER_ZIP_INDEX.keys()) all.add(z);
+  }
+  return all;
+}
+
+// Set of ZIPs in state `want` ('match' by default). null = no filter active.
+function getDataFilterMatchingZips(want) {
+  if (!isDataFilterActive()) return null;
+  want = want || 'match';
+  const out = new Set();
+  for (const z of dataFilterZipUniverse()) {
+    if (zipDataFilterState(z) === want) out.add(z);
+  }
+  return out;
 }
 
 // ============================================================================
@@ -1242,6 +1346,12 @@ function applyFiltersAndRender() {
   updateCampaignNote();
   // v1.24: keep an open ZIP / City Lookup card in step with the Carrier pills.
   refreshZipLookupCard();
+  // v1.26: carrier-share filter lines follow the Carrier pills, so a pill
+  // toggle can change which ZIPs match. Reshade (only when something the
+  // shading depends on changed) and recount.
+  refreshCarrierShareOptions();
+  restyleZipsForDataFilter();
+  renderDataFilterStatus();
 }
 
 function rowMatchesFilters(a) {
@@ -1254,9 +1364,9 @@ function rowMatchesFilters(a) {
   if (FILTERS.pipelines.size > 0 && !FILTERS.pipelines.has(a.pipeline)) return false;
   // v1.19: an active campaign narrows the map to the ZIPs that make up its area.
   if (campaignActive() && !inCampaignArea(a)) return false;
-  // Day 2+: hide pins on ZIPs that don't match the active data filter.
-  // If no filter is active, zipMatchesDataFilter always returns true.
-  if (isDataFilterActive() && !zipMatchesDataFilter(a.zip)) return false;
+  // Data filter: hide pins on ZIPs that fail it. v1.26: pins on 'nodoors'
+  // ZIPs stay (see zipDataFilterState). Always passes when no filter is on.
+  if (!rowPassesDataFilter(a)) return false;
   return true;
 }
 
@@ -1791,6 +1901,8 @@ async function fetchDemographics() {
     console.log(`Demographics: loaded ${Object.keys(ZIP_DEMOGRAPHICS).length} ZIPs (vintage: ${meta.vintage || 'unknown'}).`);
     // Render now (zones may already have been computed from ZIP layer)
     renderDemographicsPanel();
+    // v1.26: a Census filter line typed before this file arrived can now be judged.
+    if (isDataFilterActive()) { DF_STYLE_KEY = null; applyFiltersAndRender(); }
   } catch (err) {
     // Non-fatal: leave the panel showing "Loading…" → "unavailable"
     const grid = document.getElementById('demoGrid');
@@ -1859,7 +1971,9 @@ function aggregateDemographics(zips) {
 // We use the ZIP layer's _zoneCached property (set during ZIP rendering) plus
 // the current FILTERS.managers / CURRENT_VIEW. Carrier and search filters are
 // pin-level concerns and don't restrict which ZIPs are in territory scope.
-function getInScopeZips() {
+// v1.26: `want` = which data-filter state counts ('match' by default;
+// the status line also asks for 'nodoors').
+function getInScopeZips(want) {
   if (!ZIP_LAYER_DATA) return [];
   const features = ZIP_LAYER_DATA.features || [];
 
@@ -1882,7 +1996,7 @@ function getInScopeZips() {
       if (!zone || !FILTERS.managers.has(zone.account_manager)) continue;
     }
     // Day 2+: if a data filter is active, restrict scope to matching ZIPs
-    if (isDataFilterActive() && !zipMatchesDataFilter(p.zip)) continue;
+    if (isDataFilterActive() && zipDataFilterState(p.zip) !== (want || 'match')) continue;
     result.push(p.zip);
   }
   return result;
@@ -2244,7 +2358,19 @@ function assignZoneForZip(zipProps, centroidLatLng) {
   return null;
 }
 
+// v1.26: Leaflet's setStyle() MERGES options, so a dashArray set on one
+// restyle would stick to a polygon for good. Every style handed to the ZIP
+// layer therefore states dashArray (null = solid line).
+const DF_NODOORS_STROKE = '#475569';
+const DF_NODOORS_FILL   = '#94a3b8';
+const DF_NODOORS_DASH   = '4 3';
 function styleZipFeature(feat) {
+  const s = styleZipFeatureBase(feat);
+  if (!('dashArray' in s)) s.dashArray = null;
+  return s;
+}
+
+function styleZipFeatureBase(feat) {
   // Always color by zone. The previous Tier and None modes were removed in
   // Day 1B polish; every ZIP in the current DMAs is Tier 1, so Tier mode
   // produced a uniform red wash with no information value.
@@ -2276,9 +2402,15 @@ function styleZipFeature(feat) {
       // Outside the campaign area: recede to a faint grey wash.
       return { weight: 0.3, color: '#d1d5db', fillColor: '#d1d5db', fillOpacity: 0.04 };
     }
-    if (isDataFilterActive() && !zipMatchesDataFilter(feat.properties.zip)) {
+    const dfState = zipDataFilterState(feat.properties.zip);
+    if (isDataFilterActive() && dfState === 'fail') {
       // In the area but filtered out: keep the campaign hue, much lighter.
       return { weight: 0.5, color: cc, fillColor: cc, fillOpacity: 0.06 };
+    }
+    if (isDataFilterActive() && dfState === 'nodoors') {
+      // v1.26: in the area, no carrier doors: campaign hue, dashed grey outline.
+      return { weight: 1.2, color: DF_NODOORS_STROKE, dashArray: DF_NODOORS_DASH,
+               fillColor: cc, fillOpacity: 0.14 };
     }
     if (isDataFilterActive()) {
       // In the area AND a data-filter match: campaign fill, gold ring on top.
@@ -2290,7 +2422,14 @@ function styleZipFeature(feat) {
   // Data filter handling — gold ring for matches, dim grey for non-matches.
   // The filter is checked only when active; otherwise normal zone coloring.
   if (isDataFilterActive()) {
-    if (zipMatchesDataFilter(feat.properties.zip)) {
+    const dfState = zipDataFilterState(feat.properties.zip);
+    if (dfState === 'nodoors') {
+      // v1.26: no carrier doors, so a carrier-share line cannot be judged.
+      // Grey fill + dashed outline: weaker than a match, still easy to spot.
+      return { weight: 1.2, color: DF_NODOORS_STROKE, dashArray: DF_NODOORS_DASH,
+               fillColor: DF_NODOORS_FILL, fillOpacity: 0.22 };
+    }
+    if (dfState === 'match') {
       // Match: keep the zone's fill color but draw a thicker gold outline
       // on top. Use a brighter/more saturated fill so the match really pops.
       const fill = zone ? zone.color : '#d1d5db';
@@ -3061,100 +3200,223 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
 // ============================================================================
 // DATA FILTER WIRING — Day 2+
 // ============================================================================
-// The three inputs drive DATA_FILTER. Whenever any of them change, we
-// recompute and re-render the whole map view. Changes that produce a
-// half-valid filter (e.g., field selected but no value yet) just update the
-// internal state without triggering a re-style — the map stays in its
-// current state until the filter is fully valid.
+// v1.26: the block holds 1 to 5 filter lines, ANDed. Each line on screen is
+// built by buildDataFilterRow() and writes into its DATA_FILTERS entry.
+// "+ Add another filter" appends a line, x removes one, Clear goes back to a
+// single empty line. Half-typed lines are ignored until they have a value.
+const DATA_FILTER_CENSUS_OPTIONS = [
+  // [field, dropdown label, placeholder, step]
+  ['median_household_income', 'Median income',      'e.g., 100000', 1000],
+  ['population',              'Population',         'e.g., 10000',  100],
+  ['population_density',      'Density (per mi²)',  'e.g., 5000',   100],
+  ['pct_hispanic',            '% Hispanic',         'e.g., 30',     1],
+  ['pct_white_nh',            '% White (non-Hisp)', 'e.g., 50',     1],
+  ['pct_black_nh',            '% Black (non-Hisp)', 'e.g., 20',     1],
+  ['pct_asian_nh',            '% Asian (non-Hisp)', 'e.g., 10',     1],
+  ['pct_other_nh',            '% Other (non-Hisp)', 'e.g., 5',      1],
+];
+let DF_OPTIONS_ADDR = null;   // the ADDRESSES the carrier options were built from
+let DF_STYLE_KEY = null;      // filter state the ZIP layer was last shaded for
 
-(function wireDataFilter() {
-  const fieldSel = document.getElementById('dataFilterField');
-  const opSel    = document.getElementById('dataFilterOp');
-  const valIn    = document.getElementById('dataFilterValue');
-  const val2In   = document.getElementById('dataFilterValue2');
-  const status   = document.getElementById('dataFilterStatus');
-  const clearLnk = document.getElementById('clearDataFilter');
+function parseDataFilterValue(input) {
+  const t = input.value.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return isNaN(n) ? null : n;
+}
 
-  function parseValue(input) {
-    const t = input.value.trim();
-    if (t === '') return null;
-    const n = Number(t);
-    return isNaN(n) ? null : n;
+function dataFilterPlaceholder(field) {
+  if (isShareField(field)) return { val: 'e.g., 10 (%)', step: 1 };
+  const hit = DATA_FILTER_CENSUS_OPTIONS.find(o => o[0] === field);
+  return hit ? { val: hit[2], step: hit[3] } : { val: 'value', step: 1 };
+}
+
+// Census fields, then one "<carrier> share" per wireless carrier in the data.
+// Non-Wireless Investor is never offered (it never counts toward share).
+function fillDataFilterFieldSelect(sel) {
+  const keep = sel.value;
+  sel.innerHTML = '';
+  const add = (parent, value, label) => {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = label; parent.appendChild(o);
+  };
+  add(sel, '', '— select field —');
+  const census = document.createElement('optgroup');
+  census.label = 'Census';
+  for (const [v, label] of DATA_FILTER_CENSUS_OPTIONS) add(census, v, label);
+  sel.appendChild(census);
+  ensureCarrierZipIndex();
+  if (CARRIER_WIRELESS_LIST.length) {
+    const g = document.createElement('optgroup');
+    g.label = 'Carrier share (% of doors)';
+    for (const c of CARRIER_WIRELESS_LIST) add(g, DATA_FILTER_SHARE_PREFIX + c, c + ' share');
+    sel.appendChild(g);
   }
+  sel.value = keep;
+}
 
-  function renderStatus() {
-    const matches = getDataFilterMatchingZips();
-    const isActive = isDataFilterActive();
-    if (isActive && matches) {
-      // Compose with market + manager filters too — show how many of those
-      // matching ZIPs are actually in the current viewable scope
-      const inScope = getInScopeZips().length;
-      status.textContent = `${matches.size.toLocaleString()} ZIPs match (${inScope.toLocaleString()} in current scope)`;
-      status.classList.add('active');
-      clearLnk.classList.remove('disabled');
-    } else if (fieldSel.value && (valIn.value === '' || (opSel.value === 'between' && val2In.value === ''))) {
-      status.textContent = 'Enter a value to apply the filter.';
-      status.classList.remove('active');
-      clearLnk.classList.add('disabled');
-    } else {
-      status.textContent = '';
-      status.classList.remove('active');
-      clearLnk.classList.add('disabled');
-    }
-  }
+// The carrier list only exists once the Sheet has loaded. Rebuild the options
+// in every line once, keeping each line's choice.
+function refreshCarrierShareOptions() {
+  if (DF_OPTIONS_ADDR === ADDRESSES) return;
+  DF_OPTIONS_ADDR = ADDRESSES;
+  document.querySelectorAll('#dataFilterRows .df-field').forEach(fillDataFilterFieldSelect);
+}
 
-  function setInputsEnabled() {
+function buildDataFilterRow(f) {
+  const row = document.createElement('div');
+  row.className = 'datafilter-row' + (DATA_FILTERS.length > 1 ? ' has-remove' : '');
+  row.innerHTML =
+    '<select class="datafilter-select df-field" aria-label="Filter field"></select>' +
+    '<select class="datafilter-select datafilter-op df-op" aria-label="Comparison">' +
+      '<option value="gt">&gt; (greater than)</option>' +
+      '<option value="lt">&lt; (less than)</option>' +
+      '<option value="between">between</option>' +
+    '</select>' +
+    '<div class="datafilter-values">' +
+      '<input type="number" class="datafilter-input df-val" placeholder="value" inputmode="decimal" aria-label="Value">' +
+      '<input type="number" class="datafilter-input datafilter-input-2 df-val2" placeholder="and…" inputmode="decimal" aria-label="Upper value">' +
+    '</div>';
+  const fieldSel = row.querySelector('.df-field');
+  const opSel    = row.querySelector('.df-op');
+  const valIn    = row.querySelector('.df-val');
+  const val2In   = row.querySelector('.df-val2');
+  fillDataFilterFieldSelect(fieldSel);
+  fieldSel.value = f.field || '';
+  opSel.value    = f.operator || 'gt';
+  valIn.value    = f.value  == null ? '' : String(f.value);
+  val2In.value   = f.value2 == null ? '' : String(f.value2);
+
+  const sync = () => {
     const hasField = !!fieldSel.value;
-    opSel.disabled  = !hasField;
-    valIn.disabled  = !hasField;
+    opSel.disabled = !hasField;
+    valIn.disabled = !hasField;
     const isBetween = opSel.value === 'between';
     val2In.style.display = isBetween ? '' : 'none';
     val2In.disabled = !hasField || !isBetween;
-    // Adapt placeholder + step to the field
-    const placeholders = {
-      median_household_income: { val: 'e.g., 100000', step: 1000 },
-      population:              { val: 'e.g., 10000',  step: 100  },
-      population_density:      { val: 'e.g., 5000',   step: 100  },
-      pct_hispanic:            { val: 'e.g., 30',     step: 1    },
-      pct_white_nh:            { val: 'e.g., 50',     step: 1    },
-      pct_black_nh:            { val: 'e.g., 20',     step: 1    },
-      pct_asian_nh:            { val: 'e.g., 10',     step: 1    },
-      pct_other_nh:            { val: 'e.g., 5',      step: 1    },
-    };
-    const p = placeholders[fieldSel.value] || { val: 'value', step: 1 };
+    const p = dataFilterPlaceholder(fieldSel.value);
     valIn.placeholder  = p.val;
     val2In.placeholder = 'and…';
     valIn.step = p.step;
     val2In.step = p.step;
-  }
-
-  function pushFromUI() {
-    DATA_FILTER.field    = fieldSel.value || null;
-    DATA_FILTER.operator = opSel.value;
-    DATA_FILTER.value    = parseValue(valIn);
-    DATA_FILTER.value2   = parseValue(val2In);
-    setInputsEnabled();
-    renderStatus();
-    // Re-style the ZIP layer and re-render markers + demographics
-    if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+  };
+  const push = () => {
+    f.field    = fieldSel.value || null;
+    f.operator = opSel.value;
+    f.value    = parseDataFilterValue(valIn);
+    f.value2   = parseDataFilterValue(val2In);
+    sync();
     applyFiltersAndRender();
+  };
+  fieldSel.addEventListener('change', push);
+  opSel.addEventListener('change',    push);
+  valIn.addEventListener('input',     push);
+  val2In.addEventListener('input',    push);
+
+  if (DATA_FILTERS.length > 1) {
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'datafilter-remove';
+    rm.title = 'Remove this filter';
+    rm.setAttribute('aria-label', 'Remove this filter');
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      const i = DATA_FILTERS.indexOf(f);
+      if (i >= 0) DATA_FILTERS.splice(i, 1);
+      renderDataFilterRows();
+      applyFiltersAndRender();
+    });
+    row.appendChild(rm);
   }
+  sync();
+  return row;
+}
 
-  fieldSel.addEventListener('change', pushFromUI);
-  opSel.addEventListener('change',    pushFromUI);
-  valIn.addEventListener('input',     pushFromUI);
-  val2In.addEventListener('input',    pushFromUI);
+function renderDataFilterRows() {
+  const box = document.getElementById('dataFilterRows');
+  if (!box) return;
+  box.innerHTML = '';
+  DATA_FILTERS.forEach((f, i) => {
+    if (i > 0) {
+      const and = document.createElement('div');
+      and.className = 'datafilter-and';
+      and.textContent = 'AND';
+      box.appendChild(and);
+    }
+    box.appendChild(buildDataFilterRow(f));
+  });
+  DF_OPTIONS_ADDR = ADDRESSES;
+  const addBtn = document.getElementById('addDataFilter');
+  if (addBtn) addBtn.disabled = DATA_FILTERS.length >= DATA_FILTER_MAX_ROWS;
+  renderDataFilterStatus();
+}
 
-  clearLnk.addEventListener('click', () => {
-    fieldSel.value = '';
-    opSel.value = 'gt';
-    valIn.value = '';
-    val2In.value = '';
-    pushFromUI();
+// Reshade the ZIP layer only when something the shading depends on changed:
+// the complete lines, or (when a carrier-share line exists) the lit carriers.
+function restyleZipsForDataFilter() {
+  const hasShareLine = DATA_FILTERS.some(f => dataFilterLineComplete(f) && isShareField(f.field));
+  const key = JSON.stringify(activeDataFilterLines().map(f => [f.field, f.operator, f.value, f.value2])) +
+              '|' + (hasShareLine ? Array.from(FILTERS.carriers).sort().join(',') : '');
+  if (key === DF_STYLE_KEY) return;
+  DF_STYLE_KEY = key;
+  if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
+}
+
+function renderDataFilterStatus() {
+  const status   = document.getElementById('dataFilterStatus');
+  const clearLnk = document.getElementById('clearDataFilter');
+  if (!status || !clearLnk) return;
+  const out = [];
+  const active = activeDataFilterLines();
+  status.classList.toggle('active', active.length > 0);
+  if (active.length) {
+    const matches = getDataFilterMatchingZips('match');
+    const inScope = getInScopeZips('match').length;
+    const one = matches.size === 1;
+    const what = active.length > 1
+      ? (one ? `ZIP matches all ${active.length} filters` : `ZIPs match all ${active.length} filters`)
+      : (one ? 'ZIP matches' : 'ZIPs match');
+    out.push(`<span class="df-line"><span class="df-swatch match"></span>` +
+             `${matches.size.toLocaleString()} ${what} (${inScope.toLocaleString()} in current scope)</span>`);
+    if (dataFilterUsesCarrierShare()) {
+      const nod = getDataFilterMatchingZips('nodoors');
+      const nodScope = getInScopeZips('nodoors').length;
+      out.push(`<span class="df-line df-nodoors"><span class="df-swatch nodoors"></span>` +
+               `${nod.size.toLocaleString()} ${nod.size === 1 ? 'ZIP has' : 'ZIPs have'} no carrier doors (${nodScope.toLocaleString()} in current scope)</span>`);
+    }
+  }
+  for (const f of DATA_FILTERS) {
+    if (dataFilterLineComplete(f) && dataFilterLinePaused(f)) {
+      const c = escapeHtml(shareFieldCarrier(f.field));
+      out.push(`<span class="df-line df-warn">${c} share is paused: ${c} is off in the Carrier filter.</span>`);
+    }
+  }
+  if (DATA_FILTERS.some(f => f.field && !dataFilterLineComplete(f))) {
+    out.push('<span class="df-line">Enter a value to apply the filter.</span>');
+  }
+  status.innerHTML = out.join('');
+  const anything = DATA_FILTERS.length > 1 || DATA_FILTERS.some(f => f.field);
+  clearLnk.classList.toggle('disabled', !anything);
+}
+
+(function wireDataFilter() {
+  DATA_FILTERS.push(newDataFilterLine());
+  renderDataFilterRows();
+
+  document.getElementById('addDataFilter').addEventListener('click', () => {
+    if (DATA_FILTERS.length >= DATA_FILTER_MAX_ROWS) return;
+    DATA_FILTERS.push(newDataFilterLine());
+    renderDataFilterRows();
+    const sels = document.querySelectorAll('#dataFilterRows .df-field');
+    if (sels.length) sels[sels.length - 1].focus();
   });
 
-  // Initial state
-  setInputsEnabled();
+  document.getElementById('clearDataFilter').addEventListener('click', () => {
+    DATA_FILTERS.length = 0;
+    DATA_FILTERS.push(newDataFilterLine());
+    renderDataFilterRows();
+    applyFiltersAndRender();
+  });
 })();
 
 // ============================================================================
