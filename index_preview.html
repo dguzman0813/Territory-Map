@@ -253,10 +253,10 @@
     font-size: 11px; color: #6b7280; margin-top: 8px; line-height: 1.4;
   }
   .datafilter-status.active { color: #ca8a04; font-weight: 500; }
-  /* v1.26: several filter lines (AND) + carrier share fields */
+  /* v1.26: several filter lines + carrier share fields */
   .datafilter-rows { display: flex; flex-direction: column; }
   .datafilter-and { display: flex; justify-content: center; margin: 4px 0; }
-  /* v1.27: AND / OR switch. One setting for every line. */
+  /* v1.27 AND / OR pill. v1.28: small pill = inside a group, big = between groups. */
   .datafilter-join {
     font-family: inherit; font-size: 10px; font-weight: 700; letter-spacing: .08em;
     padding: 2px 12px; border: 1px solid #d1d5db; border-radius: 100px;
@@ -264,6 +264,36 @@
   }
   .datafilter-join:hover { border-color: #2563eb; color: #2563eb; }
   .datafilter-join.or { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+  .datafilter-join.big {
+    font-size: 11px; padding: 3px 16px; background: #374151; border-color: #374151; color: white;
+  }
+  .datafilter-join.big:hover { background: #1f2937; border-color: #1f2937; color: white; }
+  .datafilter-join.big.or { background: #1d4ed8; border-color: #1d4ed8; color: white; }
+  .datafilter-join.big.or:hover { background: #1e40af; border-color: #1e40af; }
+  /* v1.28: filter groups */
+  .df-groups { display: flex; flex-direction: column; }
+  .df-group {
+    border: 1px solid #c7d2fe; background: #f5f7ff; border-radius: 10px; padding: 8px;
+  }
+  .df-group-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: #4338ca; margin: 0 2px 6px; min-height: 20px;
+  }
+  .df-group-remove {
+    width: 20px; height: 20px; border: none; background: none; color: #9ca3af;
+    font-size: 15px; line-height: 20px; cursor: pointer; border-radius: 4px; padding: 0;
+    font-family: inherit;
+  }
+  .df-group-remove:hover { color: #dc2626; background: #fee2e2; }
+  .df-group .datafilter-row { background: white; padding: 8px 10px; }
+  .df-group .datafilter-row.has-remove { padding-right: 30px; }
+  .df-group .datafilter-add { margin-top: 6px; margin-left: 2px; }
+  .df-group-join { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .df-group-join::before, .df-group-join::after {
+    content: ''; flex: 1; height: 1px; background: #d1d5db;
+  }
+  .datafilter-status .df-formula { color: #374151; font-weight: 400; font-style: italic; }
   .datafilter-row { position: relative; }
   .datafilter-row.has-remove { padding-right: 32px; }
   .datafilter-remove {
@@ -808,9 +838,9 @@
         Filter ZIPs by data
         <a class="clear-link disabled" id="clearDataFilter">Clear</a>
       </h3>
-      <!-- v1.26: filter lines are built by renderDataFilterRows() -->
-      <div class="datafilter-rows" id="dataFilterRows"></div>
-      <button type="button" class="datafilter-add" id="addDataFilter">+ Add another filter</button>
+      <!-- v1.28: filter groups are built by renderDataFilterGroups() -->
+      <div class="df-groups" id="dataFilterGroups"></div>
+      <button type="button" class="datafilter-add" id="addDataFilterGroup">+ Add group</button>
       <div class="datafilter-status" id="dataFilterStatus"></div>
     </div>
 
@@ -950,33 +980,37 @@ const FILTERS = {
   pipelines: new Set(),      // HubSpot pipeline
 };
 
-// Data filter (Day 2+, reworked v1.26 2026-09-29).
-// One or more filter lines, joined by AND or (v1.27) OR. Each line is a Census field or,
-// from v1.26, a carrier's share of the doors in the ZIP ("Cricket share < 10").
-// Half-typed lines (field picked, no value yet) are ignored until complete.
+// Data filter (Day 2+; carrier share + several lines v1.26; AND/OR v1.27;
+// GROUPS v1.28 — all 2026-09-29).
+// Filters live in groups, like HubSpot's list filters (Daniel, 2026-09-29):
+//   - each group has its own AND/OR for the filters inside it (small pill)
+//   - one more AND/OR joins the groups (big pill; one setting for all groups)
+// Example: (% Hispanic > 30 OR % Asian > 30) AND (income < 80,000).
+// A filter line is a Census field or a carrier's share of the doors in the
+// ZIP ("Cricket share < 10"). Half-typed lines are ignored until complete;
+// a group with no complete line is ignored.
 //
 // Every ZIP lands in one of three states:
-//   'match'   passes every complete line -> gold ring, pins shown.
-//   'nodoors' passes every Census line, but has no carrier doors, so a
-//             carrier-share line cannot be worked out -> dashed grey outline,
-//             pins shown (only Non-Wireless Investor pins can be there).
-//             Daniel, 2026-09-29: "less importance but still noticeable".
-//   'fail'    fails any line, or has no Census value for a Census line
-//             -> dim grey, pins hidden.
-//   With OR (v1.27): 'match' if ANY line passes; else 'nodoors' if a
-//   carrier-share line could not be judged (no doors); else 'fail'.
+//   'match'   passes -> gold ring, pins shown.
+//   'nodoors' a carrier-share line hit a ZIP with no carrier doors, so it
+//             could not be judged, and nothing else decided the ZIP ->
+//             dashed grey outline, pins shown (only Non-Wireless Investor
+//             pins can be there). Daniel: "less importance but still noticeable".
+//   'fail'    -> dim grey, pins hidden. No Census value = fail for that line.
+// One rule combines lines inside a group AND groups with each other:
+//   AND: any fail -> fail; else any nodoors -> nodoors; else match.
+//   OR:  any match -> match; else any nodoors -> nodoors; else fail.
 //
 // Carrier share uses the same numbers as the ZIP hover tooltip
 // (carrierShareForZip): lit carrier pills only, Non-Wireless Investor never
 // counts, and the whole-number % the tooltip shows is what gets compared, so
 // "< 10" can never disagree with the tooltip. No minimum door count.
-const DATA_FILTER_MAX_ROWS = 5;
+const DF_MAX_GROUPS = 4;
+const DF_MAX_LINES  = 5;   // per group
 const DATA_FILTER_SHARE_PREFIX = 'share:';
-const DATA_FILTERS = [];   // one { field, operator, value, value2 } per line on screen
-// v1.27: how the lines combine. 'and' = a ZIP must pass every line;
-// 'or' = passing any one line is enough. One switch for all lines
-// (Daniel, 2026-09-29); clicking any divider flips them all. Clear resets it.
-let DATA_FILTER_MODE = 'and';
+// [{ mode: 'and'|'or', lines: [{ field, operator, value, value2 }] }]
+const DATA_FILTER_GROUPS = [];
+let DATA_FILTER_JOIN = 'and';   // how the groups combine
 
 const DATA_FILTER_FIELD_LABELS = {
   median_household_income: 'income',
@@ -991,6 +1025,9 @@ const DATA_FILTER_FIELD_LABELS = {
 
 function newDataFilterLine() {
   return { field: null, operator: 'gt', value: null, value2: null };
+}
+function newDataFilterGroup() {
+  return { mode: 'and', lines: [newDataFilterLine()] };
 }
 function isShareField(field) {
   return typeof field === 'string' && field.indexOf(DATA_FILTER_SHARE_PREFIX) === 0;
@@ -1012,13 +1049,29 @@ function dataFilterLineComplete(f) {
 function dataFilterLinePaused(f) {
   return isShareField(f.field) && !FILTERS.carriers.has(shareFieldCarrier(f.field));
 }
+function dataFilterLineActive(f) {
+  return dataFilterLineComplete(f) && !dataFilterLinePaused(f);
+}
 
-function activeDataFilterLines() {
-  return DATA_FILTERS.filter(f => dataFilterLineComplete(f) && !dataFilterLinePaused(f));
+function allDataFilterLines() {
+  const out = [];
+  for (const g of DATA_FILTER_GROUPS) for (const f of g.lines) out.push(f);
+  return out;
+}
+function activeDataFilterLines() { return allDataFilterLines().filter(dataFilterLineActive); }
+
+// Groups that have at least one active line, each carrying only those lines.
+function activeDataFilterGroups() {
+  const out = [];
+  for (const g of DATA_FILTER_GROUPS) {
+    const lines = g.lines.filter(dataFilterLineActive);
+    if (lines.length) out.push({ mode: g.mode, lines });
+  }
+  return out;
 }
 
 // Is the data filter actively narrowing the map?
-function isDataFilterActive() { return activeDataFilterLines().length > 0; }
+function isDataFilterActive() { return activeDataFilterGroups().length > 0; }
 
 function dataFilterUsesCarrierShare() {
   return activeDataFilterLines().some(f => isShareField(f.field));
@@ -1035,66 +1088,69 @@ function compareDataFilterValue(v, f) {
   return false;
 }
 
-// Per-ZIP answer cache. Thrown away whenever the lines, the lit carriers or
-// the loaded data change, so ~10,000 pins and ~4,400 polygons share one
-// answer per ZIP instead of each redoing the carrier split.
+// AND / OR over a list of items that each answer 'match' | 'nodoors' | 'fail'.
+// Stops early once the answer is certain.
+function combineDataFilter(mode, items, judge) {
+  if (mode === 'or') {
+    let sawNoDoors = false;
+    for (const it of items) {
+      const r = judge(it);
+      if (r === 'match') return 'match';
+      if (r === 'nodoors') sawNoDoors = true;
+    }
+    return sawNoDoors ? 'nodoors' : 'fail';
+  }
+  let state = 'match';
+  for (const it of items) {
+    const r = judge(it);
+    if (r === 'fail') return 'fail';
+    if (r === 'nodoors') state = 'nodoors';
+  }
+  return state;
+}
+
+// Per-ZIP answer cache. Thrown away whenever the groups, the switches, the
+// lit carriers or the loaded data change, so ~10,000 pins and ~4,400
+// polygons share one answer per ZIP instead of each redoing the carrier split.
 let DF_CACHE = new Map();
 let DF_CACHE_KEY = null;
 let DF_CACHE_ADDR = null;
 let DF_CACHE_DEMO = null;
 
-function dataFilterKey(lines) {
-  return JSON.stringify(lines.map(f => [f.field, f.operator, f.value, f.value2])) +
-         '|' + Array.from(FILTERS.carriers).sort().join(',') + '|' + DATA_FILTER_MODE;
+function dataFilterGroupsKey(groups) {
+  return JSON.stringify([DATA_FILTER_JOIN,
+    groups.map(g => [g.mode, g.lines.map(f => [f.field, f.operator, f.value, f.value2])])]);
+}
+function dataFilterKey(groups) {
+  return dataFilterGroupsKey(groups) + '|' + Array.from(FILTERS.carriers).sort().join(',');
 }
 
-// 'match' | 'nodoors' | 'fail'. Always 'match' when no line is active.
+// 'match' | 'nodoors' | 'fail'. Always 'match' when no group is active.
 function zipDataFilterState(zip) {
-  const lines = activeDataFilterLines();
-  if (!lines.length) return 'match';
+  const groups = activeDataFilterGroups();
+  if (!groups.length) return 'match';
   const z = zip5(zip);
   if (!z) return 'fail';
-  const key = dataFilterKey(lines);
+  const key = dataFilterKey(groups);
   if (key !== DF_CACHE_KEY || DF_CACHE_ADDR !== ADDRESSES || DF_CACHE_DEMO !== ZIP_DEMOGRAPHICS) {
     DF_CACHE = new Map();
     DF_CACHE_KEY = key; DF_CACHE_ADDR = ADDRESSES; DF_CACHE_DEMO = ZIP_DEMOGRAPHICS;
   }
   if (DF_CACHE.has(z)) return DF_CACHE.get(z);
   let share = null;   // worked out once per ZIP, only if a share line needs it
-  // One line's answer for this ZIP: 'pass' | 'nodoors' | 'fail'.
-  const judge = (f) => {
+  const judgeLine = (f) => {
     if (isShareField(f.field)) {
       if (!share) share = carrierShareForZip(z);
       if (!share.total) return 'nodoors';
       const row = share.rows.find(r => r.carrier === shareFieldCarrier(f.field));
-      return compareDataFilterValue(row ? row.pct : 0, f) ? 'pass' : 'fail';
+      return compareDataFilterValue(row ? row.pct : 0, f) ? 'match' : 'fail';
     }
     const rec = ZIP_DEMOGRAPHICS && ZIP_DEMOGRAPHICS[z];
     const v = rec ? rec[f.field] : null;
-    return (v != null && compareDataFilterValue(v, f)) ? 'pass' : 'fail';
+    return (v != null && compareDataFilterValue(v, f)) ? 'match' : 'fail';
   };
-  let state;
-  if (DATA_FILTER_MODE === 'or') {
-    // v1.27: any one line passing is enough. If none pass but a share line
-    // could not be judged, the ZIP still shows as "no carrier doors".
-    let sawNoDoors = false;
-    state = null;
-    for (const f of lines) {
-      const r = judge(f);
-      if (r === 'pass') { state = 'match'; break; }
-      if (r === 'nodoors') sawNoDoors = true;
-    }
-    if (!state) state = sawNoDoors ? 'nodoors' : 'fail';
-  } else {
-    // AND: every line must pass. A share line with no doors cannot fail the
-    // ZIP, so it drops to "no carrier doors" unless another line fails it.
-    state = 'match';
-    for (const f of lines) {
-      const r = judge(f);
-      if (r === 'fail') { state = 'fail'; break; }
-      if (r === 'nodoors') state = 'nodoors';
-    }
-  }
+  const state = combineDataFilter(DATA_FILTER_JOIN, groups,
+    g => combineDataFilter(g.mode, g.lines, judgeLine));
   DF_CACHE.set(z, state);
   return state;
 }
@@ -1126,12 +1182,17 @@ function describeDataFilterLine(f) {
   return '';
 }
 
-// Human-readable filter for the status / scope display.
-// Example: "income > $50,000 & Cricket share < 10%" (AND) or
-// "income > $50,000 or Cricket share < 10%" (OR, v1.27).
+// Human-readable filter for the status / scope display. A group with more
+// than one line gets brackets when there is more than one group.
+// Example: "(% Hispanic > 30% or % Asian > 30%) & income < $80,000".
 function describeDataFilter() {
-  return activeDataFilterLines().map(describeDataFilterLine).filter(Boolean)
-    .join(DATA_FILTER_MODE === 'or' ? ' or ' : ' & ');
+  const groups = activeDataFilterGroups();
+  const parts = groups.map(g => {
+    const s = g.lines.map(describeDataFilterLine).filter(Boolean)
+      .join(g.mode === 'or' ? ' or ' : ' & ');
+    return (groups.length > 1 && g.lines.length > 1) ? '(' + s + ')' : s;
+  });
+  return parts.join(DATA_FILTER_JOIN === 'or' ? ' or ' : ' & ');
 }
 
 // Every ZIP the filter can judge: Census ZIPs, ZIP polygons, ZIPs with doors.
@@ -3234,10 +3295,11 @@ document.getElementById('toggleZipLayer').addEventListener('change', e => {
 // ============================================================================
 // DATA FILTER WIRING — Day 2+
 // ============================================================================
-// v1.26: the block holds 1 to 5 filter lines, joined by AND or (v1.27) OR. Each line on screen is
-// built by buildDataFilterRow() and writes into its DATA_FILTERS entry.
-// "+ Add another filter" appends a line, x removes one, Clear goes back to a
-// single empty line. Half-typed lines are ignored until they have a value.
+// v1.28: filter GROUPS. Up to DF_MAX_GROUPS groups, DF_MAX_LINES lines each.
+// Small pill between lines = that group's AND/OR (each group has its own).
+// Big pill between groups = how the groups combine (one setting for all).
+// Clear goes back to one group with one empty line, every switch on AND.
+// Half-typed lines are ignored until they have a value.
 const DATA_FILTER_CENSUS_OPTIONS = [
   // [field, dropdown label, placeholder, step]
   ['median_household_income', 'Median income',      'e.g., 100000', 1000],
@@ -3294,12 +3356,13 @@ function fillDataFilterFieldSelect(sel) {
 function refreshCarrierShareOptions() {
   if (DF_OPTIONS_ADDR === ADDRESSES) return;
   DF_OPTIONS_ADDR = ADDRESSES;
-  document.querySelectorAll('#dataFilterRows .df-field').forEach(fillDataFilterFieldSelect);
+  document.querySelectorAll('#dataFilterGroups .df-field').forEach(fillDataFilterFieldSelect);
 }
 
-function buildDataFilterRow(f) {
+// One filter line. `g` is the group it belongs to.
+function buildDataFilterRow(f, g) {
   const row = document.createElement('div');
-  row.className = 'datafilter-row' + (DATA_FILTERS.length > 1 ? ' has-remove' : '');
+  row.className = 'datafilter-row' + (g.lines.length > 1 ? ' has-remove' : '');
   row.innerHTML =
     '<select class="datafilter-select df-field" aria-label="Filter field"></select>' +
     '<select class="datafilter-select datafilter-op df-op" aria-label="Comparison">' +
@@ -3347,7 +3410,7 @@ function buildDataFilterRow(f) {
   valIn.addEventListener('input',     push);
   val2In.addEventListener('input',    push);
 
-  if (DATA_FILTERS.length > 1) {
+  if (g.lines.length > 1) {
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'datafilter-remove';
@@ -3355,9 +3418,9 @@ function buildDataFilterRow(f) {
     rm.setAttribute('aria-label', 'Remove this filter');
     rm.textContent = '×';
     rm.addEventListener('click', () => {
-      const i = DATA_FILTERS.indexOf(f);
-      if (i >= 0) DATA_FILTERS.splice(i, 1);
-      renderDataFilterRows();
+      const i = g.lines.indexOf(f);
+      if (i >= 0) g.lines.splice(i, 1);
+      renderDataFilterGroups();
       applyFiltersAndRender();
     });
     row.appendChild(rm);
@@ -3366,46 +3429,116 @@ function buildDataFilterRow(f) {
   return row;
 }
 
-function renderDataFilterRows() {
-  const box = document.getElementById('dataFilterRows');
-  if (!box) return;
-  box.innerHTML = '';
-  DATA_FILTERS.forEach((f, i) => {
+// AND / OR pill. big = between groups; small = inside one group.
+function makeDataFilterJoinPill(isOr, big, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'datafilter-join' + (big ? ' big' : '') + (isOr ? ' or' : '');
+  btn.textContent = isOr ? 'OR' : 'AND';
+  btn.title = big
+    ? (isOr ? 'Groups: match ANY group. Click to switch to AND.'
+            : 'Groups: match EVERY group. Click to switch to OR.')
+    : (isOr ? 'This group: match ANY filter. Click to switch to AND.'
+            : 'This group: match EVERY filter. Click to switch to OR.');
+  btn.setAttribute('aria-label', btn.title);
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function focusLastDataFilterField(gi) {
+  const boxes = document.querySelectorAll('#dataFilterGroups .df-group');
+  const sels = boxes[gi] ? boxes[gi].querySelectorAll('.df-field') : [];
+  if (sels.length) sels[sels.length - 1].focus();
+}
+
+function buildDataFilterGroup(g, gi) {
+  const box = document.createElement('div');
+  box.className = 'df-group';
+
+  const head = document.createElement('div');
+  head.className = 'df-group-head';
+  const title = document.createElement('span');
+  title.textContent = 'Group ' + (gi + 1);
+  head.appendChild(title);
+  if (DATA_FILTER_GROUPS.length > 1) {
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'df-group-remove';
+    rm.title = 'Remove group ' + (gi + 1);
+    rm.setAttribute('aria-label', rm.title);
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      const i = DATA_FILTER_GROUPS.indexOf(g);
+      if (i >= 0) DATA_FILTER_GROUPS.splice(i, 1);
+      renderDataFilterGroups();
+      applyFiltersAndRender();
+    });
+    head.appendChild(rm);
+  }
+  box.appendChild(head);
+
+  const rows = document.createElement('div');
+  rows.className = 'datafilter-rows';
+  g.lines.forEach((f, i) => {
     if (i > 0) {
-      // v1.27: the divider is the AND / OR switch. One setting for all lines.
       const wrap = document.createElement('div');
       wrap.className = 'datafilter-and';
-      const isOr = DATA_FILTER_MODE === 'or';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'datafilter-join' + (isOr ? ' or' : '');
-      btn.textContent = isOr ? 'OR' : 'AND';
-      btn.title = isOr ? 'Match ANY line. Click to switch to AND.'
-                       : 'Match EVERY line. Click to switch to OR.';
-      btn.setAttribute('aria-label', btn.title);
-      btn.addEventListener('click', () => {
-        DATA_FILTER_MODE = isOr ? 'and' : 'or';
-        renderDataFilterRows();
+      wrap.appendChild(makeDataFilterJoinPill(g.mode === 'or', false, () => {
+        g.mode = g.mode === 'or' ? 'and' : 'or';
+        renderDataFilterGroups();
         applyFiltersAndRender();
-      });
-      wrap.appendChild(btn);
+      }));
+      rows.appendChild(wrap);
+    }
+    rows.appendChild(buildDataFilterRow(f, g));
+  });
+  box.appendChild(rows);
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'datafilter-add df-add-line';
+  add.textContent = '+ Add filter';
+  add.disabled = g.lines.length >= DF_MAX_LINES;
+  add.addEventListener('click', () => {
+    if (g.lines.length >= DF_MAX_LINES) return;
+    g.lines.push(newDataFilterLine());
+    renderDataFilterGroups();
+    focusLastDataFilterField(DATA_FILTER_GROUPS.indexOf(g));
+  });
+  box.appendChild(add);
+  return box;
+}
+
+function renderDataFilterGroups() {
+  const box = document.getElementById('dataFilterGroups');
+  if (!box) return;
+  box.innerHTML = '';
+  DATA_FILTER_GROUPS.forEach((g, gi) => {
+    if (gi > 0) {
+      const wrap = document.createElement('div');
+      wrap.className = 'df-group-join';
+      wrap.appendChild(makeDataFilterJoinPill(DATA_FILTER_JOIN === 'or', true, () => {
+        DATA_FILTER_JOIN = DATA_FILTER_JOIN === 'or' ? 'and' : 'or';
+        renderDataFilterGroups();
+        applyFiltersAndRender();
+      }));
       box.appendChild(wrap);
     }
-    box.appendChild(buildDataFilterRow(f));
+    box.appendChild(buildDataFilterGroup(g, gi));
   });
   DF_OPTIONS_ADDR = ADDRESSES;
-  const addBtn = document.getElementById('addDataFilter');
-  if (addBtn) addBtn.disabled = DATA_FILTERS.length >= DATA_FILTER_MAX_ROWS;
+  const addG = document.getElementById('addDataFilterGroup');
+  if (addG) addG.disabled = DATA_FILTER_GROUPS.length >= DF_MAX_GROUPS;
   renderDataFilterStatus();
 }
 
 // Reshade the ZIP layer only when something the shading depends on changed:
-// the complete lines, or (when a carrier-share line exists) the lit carriers.
+// the complete lines, the switches, or (when a carrier-share line exists)
+// the lit carriers.
 function restyleZipsForDataFilter() {
-  const hasShareLine = DATA_FILTERS.some(f => dataFilterLineComplete(f) && isShareField(f.field));
-  const key = JSON.stringify(activeDataFilterLines().map(f => [f.field, f.operator, f.value, f.value2])) +
-              '|' + (hasShareLine ? Array.from(FILTERS.carriers).sort().join(',') : '') +
-              '|' + DATA_FILTER_MODE;
+  const hasShareLine = allDataFilterLines().some(f => dataFilterLineComplete(f) && isShareField(f.field));
+  const key = dataFilterGroupsKey(activeDataFilterGroups()) +
+              '|' + (hasShareLine ? Array.from(FILTERS.carriers).sort().join(',') : '');
   if (key === DF_STYLE_KEY) return;
   DF_STYLE_KEY = key;
   if (ZIP_LAYER_GROUP) ZIP_LAYER_GROUP.setStyle(styleZipFeature);
@@ -3416,56 +3549,54 @@ function renderDataFilterStatus() {
   const clearLnk = document.getElementById('clearDataFilter');
   if (!status || !clearLnk) return;
   const out = [];
-  const active = activeDataFilterLines();
-  status.classList.toggle('active', active.length > 0);
-  if (active.length) {
+  const active = isDataFilterActive();
+  status.classList.toggle('active', active);
+  if (active) {
     const matches = getDataFilterMatchingZips('match');
     const inScope = getInScopeZips('match').length;
-    const one = matches.size === 1;
-    const howMany = DATA_FILTER_MODE === 'or' ? 'any of' : 'all';
-    const what = active.length > 1
-      ? (one ? `ZIP matches ${howMany} ${active.length} filters` : `ZIPs match ${howMany} ${active.length} filters`)
-      : (one ? 'ZIP matches' : 'ZIPs match');
+    const n = matches.size;
     out.push(`<span class="df-line"><span class="df-swatch match"></span>` +
-             `${matches.size.toLocaleString()} ${what} (${inScope.toLocaleString()} in current scope)</span>`);
+             `${n.toLocaleString()} ${n === 1 ? 'ZIP matches' : 'ZIPs match'} (${inScope.toLocaleString()} in current scope)</span>`);
     if (dataFilterUsesCarrierShare()) {
       const nod = getDataFilterMatchingZips('nodoors');
       const nodScope = getInScopeZips('nodoors').length;
       out.push(`<span class="df-line df-nodoors"><span class="df-swatch nodoors"></span>` +
                `${nod.size.toLocaleString()} ${nod.size === 1 ? 'ZIP has' : 'ZIPs have'} no carrier doors (${nodScope.toLocaleString()} in current scope)</span>`);
     }
+    // v1.28: spell out the logic, brackets and all, so nobody has to guess.
+    out.push(`<span class="df-line df-formula">${escapeHtml(describeDataFilter())}</span>`);
   }
-  for (const f of DATA_FILTERS) {
+  for (const f of allDataFilterLines()) {
     if (dataFilterLineComplete(f) && dataFilterLinePaused(f)) {
       const c = escapeHtml(shareFieldCarrier(f.field));
       out.push(`<span class="df-line df-warn">${c} share is paused: ${c} is off in the Carrier filter.</span>`);
     }
   }
-  if (DATA_FILTERS.some(f => f.field && !dataFilterLineComplete(f))) {
+  if (allDataFilterLines().some(f => f.field && !dataFilterLineComplete(f))) {
     out.push('<span class="df-line">Enter a value to apply the filter.</span>');
   }
   status.innerHTML = out.join('');
-  const anything = DATA_FILTERS.length > 1 || DATA_FILTERS.some(f => f.field);
+  const anything = DATA_FILTER_GROUPS.length > 1 || DATA_FILTER_JOIN !== 'and' ||
+    DATA_FILTER_GROUPS.some(g => g.lines.length > 1 || g.mode !== 'and' || g.lines.some(f => f.field));
   clearLnk.classList.toggle('disabled', !anything);
 }
 
 (function wireDataFilter() {
-  DATA_FILTERS.push(newDataFilterLine());
-  renderDataFilterRows();
+  DATA_FILTER_GROUPS.push(newDataFilterGroup());
+  renderDataFilterGroups();
 
-  document.getElementById('addDataFilter').addEventListener('click', () => {
-    if (DATA_FILTERS.length >= DATA_FILTER_MAX_ROWS) return;
-    DATA_FILTERS.push(newDataFilterLine());
-    renderDataFilterRows();
-    const sels = document.querySelectorAll('#dataFilterRows .df-field');
-    if (sels.length) sels[sels.length - 1].focus();
+  document.getElementById('addDataFilterGroup').addEventListener('click', () => {
+    if (DATA_FILTER_GROUPS.length >= DF_MAX_GROUPS) return;
+    DATA_FILTER_GROUPS.push(newDataFilterGroup());
+    renderDataFilterGroups();
+    focusLastDataFilterField(DATA_FILTER_GROUPS.length - 1);
   });
 
   document.getElementById('clearDataFilter').addEventListener('click', () => {
-    DATA_FILTER_MODE = 'and';
-    DATA_FILTERS.length = 0;
-    DATA_FILTERS.push(newDataFilterLine());
-    renderDataFilterRows();
+    DATA_FILTER_JOIN = 'and';
+    DATA_FILTER_GROUPS.length = 0;
+    DATA_FILTER_GROUPS.push(newDataFilterGroup());
+    renderDataFilterGroups();
     applyFiltersAndRender();
   });
 })();
